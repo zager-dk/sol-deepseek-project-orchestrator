@@ -1,0 +1,72 @@
+# Illustrative Codex + Codex Router configuration.
+#
+# This file is an EXAMPLE, not a drop-in config. Copy the parts you need into
+# your own ~/.codex/config.toml after reading your router's README.
+#
+# It contains no secrets and no real capability URL -- only placeholders.
+# Never commit a real caller capability URL, router key, or provider API key.
+
+# ---------------------------------------------------------------------------
+# 1. Router-managed client block (written by the router's own installer)
+# ---------------------------------------------------------------------------
+# A router normally writes this block itself. It is reproduced here only so you
+# can recognize it. The <generated-capability> segment is local caller
+# authentication: treat it as a secret, do not paste it into issues or chats,
+# and rotate it through the router's supported command if it leaks.
+
+# BEGIN codex-router-managed (illustrative)
+openai_base_url = "http://127.0.0.1:4202/_codex-router/<generated-capability>/v1"
+model_catalog_json = "/absolute/path/to/.codex/codex-router/merged-models.json"
+# END codex-router-managed
+
+# BEGIN codex-router-provider-managed (illustrative)
+[model_providers.codex-router]
+name = "Codex Router (external models)"
+base_url = "http://127.0.0.1:4202/_codex-router/<generated-capability>/v1"
+wire_api = "responses"
+# END codex-router-provider-managed
+
+# ---------------------------------------------------------------------------
+# 2. Subagent settings
+# ---------------------------------------------------------------------------
+# Keep the concurrent thread cap small. One worker per substantial bundle is the
+# whole point of the thin-root workflow; extra parallel threads multiply review
+# surface without removing the review step.
+
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 2
+# Optional: make DeepSeek the default subagent model for this project only.
+# Leaving this commented out leaves the existing subagent default unchanged; it
+# does not decide what the DeepSeek worker runs on. The worker's route comes from
+# its own agent file and the explicit route given at dispatch, so the worker still
+# reaches DeepSeek either way.
+# default_subagent_model = "deepseek/deepseek-v4.1-flash"
+
+# ---------------------------------------------------------------------------
+# 3. Where keys live
+# ---------------------------------------------------------------------------
+# Provider API keys belong to the router, not to this file. The router stores
+# them in its own protected state and exposes a redacted status command. Do not
+# add api_key / env_key values here.
+#
+# Useful router-shaped commands (verify against your router README; Windows
+# users typically call the .ps1 equivalents):
+#
+#   ./bin/model-router codex providers
+#   ./bin/model-router codex providers enable deepseek
+#   ./bin/model-router codex provider-key deepseek set
+#   ./bin/model-router codex caller-key rotate
+#
+# Restart or reopen Codex after changing model routing so cached client
+# configuration cannot keep using a stale route.
+
+# ---------------------------------------------------------------------------
+# 4. Hooks
+# ---------------------------------------------------------------------------
+# Hooks are enabled by default. The bundled installer writes project-local
+# hooks to <repo>/.codex/hooks.json, which Codex loads only when the project
+# .codex layer is trusted. To turn hooks off entirely:
+#
+# [features]
+# hooks = false

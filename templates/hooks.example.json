@@ -1,0 +1,34 @@
+{
+  "_comment": "Reference shape for <repo>/.codex/hooks.json. The installer generates a copy of this with real interpreter and script paths; do not hand-edit the generated file unless you also re-run the installer. JSON keys are camelCase (commandWindows); TOML config.toml accepts command_windows. The SessionStart matcher includes 'compact', which is what covers the window after compaction.",
+  "description": "Project state injection and one-shot state nudge for the Sol + DeepSeek thin-root workflow.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"/absolute/path/to/repo/.codex/hooks/inject_project_state.py\"",
+            "commandWindows": "\"C:\\\\Path\\\\to\\\\python.exe\" \"C:\\\\absolute\\\\path\\\\to\\\\repo\\\\.codex\\\\hooks\\\\inject_project_state.py\"",
+            "timeout": 15,
+            "statusMessage": "Loading project state",
+            "additionalContextLimit": 4000
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"/absolute/path/to/repo/.codex/hooks/stop_project_state_check.py\"",
+            "commandWindows": "\"C:\\\\Path\\\\to\\\\python.exe\" \"C:\\\\absolute\\\\path\\\\to\\\\repo\\\\.codex\\\\hooks\\\\stop_project_state_check.py\"",
+            "timeout": 20,
+            "statusMessage": "Checking project state"
+          }
+        ]
+      }
+    ]
+  }
+}

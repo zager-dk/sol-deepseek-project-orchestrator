@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Installer artifacts
+*.bak
+*.tmp-install
+
+# Machine-local generated hook configuration (absolute paths)
+.codex/hooks.json
+.codex/hooks/*.py
+
+# Project state is usually committed per project, but never commit one that
+# contains secrets, internal hostnames, or customer data.
+
+# Secrets and local environment
+.env
+.env.*
+*.secret
+*api-key*
+*apikey*
+*.pem
+*.key
+credentials.json
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and scratch output
+*.log
+work/
+tmp/
