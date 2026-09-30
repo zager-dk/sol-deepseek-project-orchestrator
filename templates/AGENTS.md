@@ -1,45 +1,39 @@
-<!-- Example project AGENTS.md for the Sol + DeepSeek thin-root workflow. -->
-<!-- Adapt the wording to your project, then keep the rules that matter. -->
+<!-- Example AGENTS.md for GPT-6.1 Sol + DeepSeek adaptive thin-root orchestration. -->
 
-## Working agreement for this repository
+## Working agreement
 
-For substantial coding work, use the `sol-deepseek-project-orchestrator` skill:
-keep the root model as a thin technical lead, and delegate one coherent
-implementation bundle to the DeepSeek worker agent.
+For substantial coding work, use the `sol-deepseek-project-orchestrator` skill.
 
-### Root responsibilities
+### Root
 
-- Establish scope, contracts, acceptance criteria, and non-goals.
-- Dispatch one coherent bundle. Do not split work into tiny sequential handoffs.
-- Wait once for the completion report. Do not poll for progress.
-- Review the finished diff and evidence in one batched pass.
-- Send at most one batched correction request.
-- Own `.codex/PROJECT_STATE.md` and keep it current before ending a turn.
+- Preferred root: GPT-6.1 Sol High, Standard speed.
+- Keep the root thin: scope/contracts, adaptive delegation, integration judgement, one batched review, at most one correction phase.
+- Default to one DeepSeek worker.
+- Use two or three only for genuinely independent streams with clear ownership and meaningful wall-clock benefit.
+- Do not poll workers. Wait for all; stop/close finished children before the
+  integrator starts. Workers and integrators do not delegate further.
+- A current user request for single-agent work takes precedence.
+- Existing GPT-5.6 Sol roots and the one-worker path remain supported.
+- Own `.codex/PROJECT_STATE.md`.
 
-### Worker rules
+### Parallel workers
 
-- The worker owns repository discovery, implementation, tests, debugging, and
-  routine verification inside the stated scope.
-- The worker does not spawn nested agents, commit, push, deploy, or expand scope.
-- The worker returns one completion report, not play-by-play updates.
-- The worker reports a blocker instead of redesigning the system around it.
+- Multiple concurrent writers require isolated worktrees/branches at one clean
+  baseline. If isolated dispatch is unavailable, use one writer.
+- Every worker gets explicit OWNERSHIP and NO-TOUCH paths.
+- Workers never edit `.codex/PROJECT_STATE.md`.
+- If safe write isolation is unavailable, keep one writer and use extra workers only for read-only investigation/review.
 
-### Small tasks
+### Integration
 
-Formatting, a one-line fix, a tiny text change, or a simple configuration edit
-do not need a worker. The root does those directly.
-
-### Escalate to the user only for
-
-- subjective product or UX choices that materially change the result;
-- requirements that genuinely conflict;
-- destructive or irreversible operations;
-- credentials, spending, publication, or production deployment;
-- architecture choices with product consequences;
-- a genuine blocker that survived one correction cycle.
+- With one writer, Sol reviews the result directly.
+- With multiple writers, run one `deepseek_integrator` pass first
+  (legacy `deepseek_worker` with ROLE=integrator is supported).
+- The integrator may combine local worker commits/patches and resolve routine conflicts only when explicitly authorized.
+- Sol reviews the integrated result once rather than re-reviewing every worker independently.
 
 ### Safety
 
-- Never commit secrets, tokens, or machine-specific paths.
-- Do not weaken tests, types, validation, or security checks to make a command pass.
-- Do not publish, push, or deploy without explicit confirmation.
+- No push, publish, deploy, destructive remote action, or credentials change without explicit user approval.
+- Do not weaken tests/types/validation/security checks to obtain a green result.
+- Stop and escalate product/architecture ambiguity rather than inventing a cross-stream decision.

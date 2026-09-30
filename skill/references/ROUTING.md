@@ -4,7 +4,7 @@ This document states what the orchestrator can and cannot promise about the Deep
 
 ## What must be true
 
-- The root is a capable lead model. **GPT-5.6 Sol at high reasoning is the
+- The root is a capable lead model. **GPT-6.1 Sol at high reasoning is the
   preferred choice**; if the user selects another root model, the
   workflow still applies, but the Sol pairing is the default this repository
   documents.
@@ -21,6 +21,11 @@ model_reasoning_effort = "high"
 ```
 
 Install it to `~/.codex/agents/deepseek-worker.toml` (personal) or `<repo>/.codex/agents/deepseek-worker.toml` (project-scoped). Codex loads standalone agent files from those directories and identifies the agent by the `name` field.
+
+The optional `deepseek_integrator` role uses the same explicit model/effort.
+Install it with `--adaptive`, or use a legacy worker with ROLE=integrator.
+Neither route changes the selected root or shares credentials. Existing GPT-5.6
+Sol roots remain supported.
 
 ## Legacy name
 

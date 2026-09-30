@@ -1,5 +1,24 @@
 # Troubleshooting
 
+## Adaptive v0.2
+
+| Symptom | Action |
+| --- | --- |
+| Only one worker runs | Default behavior. Check independence, ownership, writable isolation, and existing AGENTS.md. One-writer policies are preserved by install. |
+| Integrator missing | Install `--adaptive`, restart, verify `--adaptive`, or explicitly brief the legacy worker as ROLE=integrator. |
+| Integrator has no slot | Stop/close completed writers first. The integrator is sequential; don't raise concurrency above three to compensate. |
+| Dirty/unborn project rejected | Preserve/commit only authorized project work, then choose a clean baseline, or use one writer. No automatic stash/reset. |
+| Task path/branch exists | Inspect retained work and choose a fresh ID. Never force replacement; partial-setup manifests record completed workspaces. |
+| Worktree outside writable roots | Use permitted isolated paths and supported dispatch, or one writer. Do not loosen permissions. |
+| State/hooks/dependencies missing | Only committed files are checked out. Pass sanitized state in the brief; obey network/spending rules for dependencies. |
+| Additions disappear on transfer | Plain git diff omits untracked files. Use explicitly authorized local commits or complete reviewed patches, including binaries and deletions. |
+| Integration has a contract conflict | Return the exact conflict to Sol. Preserve successful outputs if another stream is blocked; never redefine acceptance. |
+| One correction still fails | Diagnose and surface the actual blocker. The budget covers the whole bundle, not one retry per worker. |
+
+Offline tests prove local file/Git behavior, not routed model identity or provider
+billing. Confirm both model IDs in your router; install never starts paid requests.
+
+
 Symptoms first, then the fix.
 
 ## Installation

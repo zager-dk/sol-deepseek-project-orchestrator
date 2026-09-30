@@ -67,10 +67,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="run the installed hooks against a throwaway git repository",
     )
     parser.add_argument("--json", action="store_true", help="machine-readable output")
+    parser.add_argument("--adaptive", action="store_true", help="also require the adaptive references, helper, and integrator")
     return parser.parse_args(argv)
 
 
-def check_layout(project: Path, codex_home: Path, report: Report) -> None:
+def check_layout(project: Path, codex_home: Path, report: Report, *, adaptive: bool = False) -> None:
     skill_dir = codex_home / "skills" / SKILL_NAME
     report.check("skill directory", skill_dir.is_dir(), str(skill_dir))
     report.check(
@@ -101,6 +102,22 @@ def check_layout(project: Path, codex_home: Path, report: Report) -> None:
         )
     else:
         report.warn("custom agent", f"not installed at {agent}")
+
+    if adaptive:
+        for relative in (
+            "references/PARALLELISM_POLICY.md",
+            "references/MODEL_NOTES.md",
+            "references/WORKTREE_PROTOCOL.md",
+            "scripts/prepare_worktrees.py",
+        ):
+            path = skill_dir / relative
+            report.check(f"adaptive {relative}", path.is_file(), str(path))
+        integrator = codex_home / "agents" / "deepseek-integrator.toml"
+        if report.check("integrator present", integrator.is_file(), str(integrator)):
+            text = integrator.read_text(encoding="utf-8", errors="replace")
+            report.check("integrator declares deepseek_integrator", 'name = "deepseek_integrator"' in text)
+            report.check("integrator declares a model", "model = " in text)
+            report.warn("integrator model id", "confirm this route resolves to DeepSeek V4.1 Flash in your own router catalog")
 
     state = project / ".codex" / "PROJECT_STATE.md"
     if state.is_file():
@@ -312,7 +329,7 @@ def main(argv: list[str] | None = None) -> int:
     codex_home = Path(raw).expanduser()
 
     report = Report()
-    check_layout(project, codex_home, report)
+    check_layout(project, codex_home, report, adaptive=args.adaptive)
     if args.self_test:
         hook_self_test(project, report)
 

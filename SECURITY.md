@@ -1,5 +1,23 @@
 # Security Notes
 
+## Adaptive workers and worktrees
+
+Worktrees isolate concurrent writes but share Git objects/configuration; they
+are not a security sandbox. Keep existing permissions, approval, and provider
+data-sharing controls. Each user supplies their own provider credentials.
+
+Parallelize disjoint ownership at a clean baseline with frozen contracts. Do not
+copy secret/ignored files or stash/reset unrelated user work. The offline helper
+creates local paths/branches only, never inference, commits, or cleanup. Keep
+its manifest local because it contains machine paths.
+
+Local commits require explicit isolated-task authority; stage named owned files.
+The integrator checks exact inputs and rejects out-of-scope or PROJECT_STATE
+edits before application. Architecture/security ambiguity goes to Sol. Root
+acceptance never grants push/deploy rights. Preserve failed/dirty worktrees
+until changes are safely retained; never force-delete them.
+
+
 This repository ships configuration and small scripts. It ships no credentials,
 no network calls, and no telemetry. The security questions that actually matter
 are about the pieces you install and the state you keep.

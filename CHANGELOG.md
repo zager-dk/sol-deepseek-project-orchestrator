@@ -5,9 +5,45 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - Unreleased
+
+### Added
+
+- Adaptive choice of 1–3 DeepSeek V4.1 Flash workers, with disjoint ownership,
+  shared-contract prerequisites, and isolated worktrees for parallel writers.
+- Optional `deepseek_integrator` native role via installer `--adaptive`; one
+  consolidated integration/verification pass before root acceptance.
+- Parallelism/model/worktree references and a complete parallel example.
+- Offline `skill/scripts/prepare_worktrees.py`: clean-baseline preflight, 1–3
+  writer worktrees, a separate integration worktree, manifest, and dry-run.
+  Existing paths/branches and partial failures are preserved; no auto commits.
+- `verify_install.py --adaptive`, integrator uninstall, and isolation/integration
+  regression tests covering additions, deletion, binary transfer, upgrade
+  preservation, idempotence, and conflict handling.
+
+### Changed
+
+- Preferred root is GPT-6.1 Sol High / Standard. GPT-5.6 Sol and existing
+  single-worker installs, CLI flags, hooks, state schema, and legacy worker alias
+  remain compatible. Installation never selects a root or changes routing.
+- Workers and integrators cannot update PROJECT_STATE.md. Only the root records
+  accepted status. Local commits require explicit isolated-worktree authority;
+  remote writes require the user's authorization.
+- One batched root review and at most one correction phase cover the integrated
+  bundle. Completed writers release slots before the integrator starts.
+- README, Russian overview, architecture, install/quickstart, safety, and
+  troubleshooting describe adaptive operation and migration from v0.1.
 
 ### Fixed
+
+- Uninstall preserves customized/older worker and integrator definitions for
+  manual review. Source text has consistent LF line endings across platforms.
+
+## [0.1.0] - 2026-09-29
+
+First public release.
+
+### Initial packaging fixes
 
 - `hooks.json` now uses the camelCase `commandWindows` key for the Windows
   command override. `command_windows` is accepted only in inline `[hooks]`
@@ -25,16 +61,6 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   worker dispatch. It now says the existing subagent default is left unchanged,
   and that the worker route comes from the agent file plus the explicit route at
   dispatch.
-
-### Changed
-
-- The GPT-5.6 Sol at high reasoning root preference is now explicit in
-  `ARCHITECTURE.md`, `skill/SKILL.md`, `skill/references/ROUTING.md`, and the
-  README, while still allowing another root model when the user selects one.
-
-## [0.1.0] - 2026-09-29
-
-First public release.
 
 ### Added
 
@@ -78,5 +104,5 @@ First public release.
 - No secrets, machine paths, or private configuration are included in this
   repository.
 
-[Unreleased]: https://github.com/zager-dk/sol-deepseek-project-orchestrator/compare/v0.1.0...HEAD
+[0.2.0]: https://github.com/zager-dk/sol-deepseek-project-orchestrator/compare/v0.1.0...feat/gpt-6.1-adaptive-deepseek
 [0.1.0]: https://github.com/zager-dk/sol-deepseek-project-orchestrator/tree/v0.1.0

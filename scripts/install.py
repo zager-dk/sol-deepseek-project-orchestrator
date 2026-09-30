@@ -33,6 +33,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SKILL_NAME = "sol-deepseek-project-orchestrator"
 AGENT_FILE_NAME = "deepseek-worker.toml"
+INTEGRATOR_FILE_NAME = "deepseek-integrator.toml"
 
 EXIT_OK = 0
 EXIT_ERROR = 2
@@ -281,6 +282,7 @@ def build_plan(
     with_agent: bool,
     prune: bool,
     plan: Plan,
+    with_integrator: bool = False,
 ) -> Plan:
     skill_dir = REPO_ROOT / "skill"
     skill_dest = codex_home / "skills" / SKILL_NAME
@@ -314,6 +316,14 @@ def build_plan(
             REPO_ROOT / "templates" / "agents" / AGENT_FILE_NAME,
             codex_home / "agents" / AGENT_FILE_NAME,
             origin="agent",
+        )
+
+    if with_integrator:
+        add_file_plan(
+            plan,
+            REPO_ROOT / "templates" / "agents" / INTEGRATOR_FILE_NAME,
+            codex_home / "agents" / INTEGRATOR_FILE_NAME,
+            origin="integrator",
         )
 
     add_file_plan(
@@ -542,9 +552,14 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="also drop the example AGENTS.md into the project root",
     )
     parser.add_argument(
+        "--adaptive",
+        action="store_true",
+        help="also install the DeepSeek integrator for adaptive parallel work",
+    )
+    parser.add_argument(
         "--no-agent",
         action="store_true",
-        help="skip the deepseek-worker.toml custom agent (manage routing yourself)",
+        help="skip all custom agents (manage worker/integrator routing yourself)",
     )
     parser.add_argument(
         "--force",
@@ -588,6 +603,7 @@ def main(argv: list[str] | None = None) -> int:
             with_agent=not args.no_agent,
             prune=args.prune,
             plan=plan,
+            with_integrator=args.adaptive and not args.no_agent,
         )
     except InstallError as exc:
         print(f"error: {exc}", file=sys.stderr)

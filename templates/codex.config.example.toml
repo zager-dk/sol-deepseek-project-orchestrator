@@ -29,13 +29,15 @@ wire_api = "responses"
 # ---------------------------------------------------------------------------
 # 2. Subagent settings
 # ---------------------------------------------------------------------------
-# Keep the concurrent thread cap small. One worker per substantial bundle is the
-# whole point of the thin-root workflow; extra parallel threads multiply review
-# surface without removing the review step.
+# Adaptive cap: 1 worker by default; up to 3 independent isolated writers.
+# The integrator runs after completed writers are stopped/closed, so it reuses
+# their slots. The cap excludes the primary root. This file is illustrative;
+# the installer does not write it or enable paid model requests.
+# Schema: https://developers.openai.com/codex/subagents
 
 [agents]
 enabled = true
-max_concurrent_threads_per_session = 2
+max_concurrent_threads_per_session = 3
 # Optional: make DeepSeek the default subagent model for this project only.
 # Leaving this commented out leaves the existing subagent default unchanged; it
 # does not decide what the DeepSeek worker runs on. The worker's route comes from

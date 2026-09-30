@@ -51,7 +51,8 @@ as machine-readable output.
 | `--codex-home PATH` | Codex home. Falls back to the `CODEX_HOME` variable. |
 | `--hooks` | Also write project-local hooks and `.codex/hooks.json`. |
 | `--agents-md` | Also drop the example `AGENTS.md` into the project root. |
-| `--no-agent` | Skip `deepseek-worker.toml`; you manage routing yourself. |
+| `--adaptive` | Additionally install `deepseek-integrator.toml`; no agents are launched. |
+| `--no-agent` | Skip all custom agents, including with `--adaptive`; manage routing yourself. |
 | `--force` | Replace managed files that differ, backing each up as `.bak`. |
 | `--prune` | Remove files inside the installed skill directory that are not in this bundle. |
 | `--dry-run` | Print the plan; write nothing. |
@@ -66,8 +67,13 @@ as machine-readable output.
     references/DELEGATION_CONTRACT.md
     references/STATE_POLICY.md
     references/ROUTING.md
+    references/PARALLELISM_POLICY.md
+    references/MODEL_NOTES.md
+    references/WORKTREE_PROTOCOL.md
+    scripts/prepare_worktrees.py
 
 <codex-home>/agents/deepseek-worker.toml          (unless --no-agent)
+<codex-home>/agents/deepseek-integrator.toml      (--adaptive, unless --no-agent)
 
 <project>/.codex/PROJECT_STATE.md                  (created once, never replaced)
 <project>/AGENTS.md                                (only with --agents-md, never replaced)
@@ -99,6 +105,33 @@ Exit code 3 is the important one. If any managed file already exists with
 different content, the installer writes nothing at all and tells you which files
 collided. Re-run with `--force` to replace them (each replaced file is saved
 next to the original as `<name>.bak`), or delete them yourself.
+
+## Adaptive install and upgrade from v0.1
+
+```bash
+python scripts/install.py --project ~/code/my-project --codex-home ~/.codex --adaptive --hooks --dry-run
+# Inspect the conflict list and backups before replacing managed files:
+python scripts/install.py --project ~/code/my-project --codex-home ~/.codex --adaptive --hooks --force
+python scripts/verify_install.py --project ~/code/my-project --codex-home ~/.codex --adaptive --self-test
+```
+
+Without `--adaptive`, old commands keep one worker and omit the separate
+integrator. All new skill references and the offline worktree helper are copied
+automatically; the root chooses parallelism only when justified and safe.
+`--no-agent` skips both roles, even with `--adaptive`. If managing agents yourself,
+install equivalent roles before using verifier `--adaptive`, which requires them.
+
+Existing `.codex/PROJECT_STATE.md`, `AGENTS.md`, root model selection, router
+configuration, and legacy `astra_flash_builder` files are preserved. Existing
+AGENTS.md is never auto-upgraded: review its local rules and adapt from the new
+template before enabling parallel work. Conflicting one-writer policies stay in
+force until you change them. Fresh installs do not silently enable parallel
+threads or alter `config.toml`.
+
+Restart Codex and confirm worker/integrator roles and workspace dispatch support.
+If a legacy worker is used as integrator, give it ROLE=integrator and the explicit
+integration contract. Worktree setup is a separate local operation documented in
+[WORKTREE_PROTOCOL.md](skill/references/WORKTREE_PROTOCOL.md).
 
 ## Re-running
 
@@ -135,6 +168,9 @@ python scripts/verify_install.py --project ~/code/my-project --codex-home ~/.cod
 python scripts/verify_install.py --project ~/code/my-project --codex-home ~/.codex --self-test
 ```
 
+With `--adaptive`, the verifier additionally requires adaptive references, the
+helper, and the integrator role. It does not run that helper or invoke a model.
+
 The verifier checks that every expected file exists, that the hook configuration
 parses and points at real scripts, and that the state file is a sane size. With
 `--self-test` it also runs the installed hooks against a throwaway git
@@ -143,6 +179,10 @@ repository: state injection, silence on a clean tree, and the one-shot nudge.
 Exit code `1` means an error; warnings alone do not fail the check.
 
 ## Uninstall
+
+The uninstaller also removes the optional integrator when its content matches
+the bundled definition. Customized or older agent definitions are kept for
+manual review. Task worktrees/branches are never deleted by uninstall.
 
 ```bash
 python scripts/uninstall.py --project ~/code/my-project --codex-home ~/.codex --dry-run

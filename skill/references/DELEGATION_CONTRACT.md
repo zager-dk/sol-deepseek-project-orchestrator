@@ -1,13 +1,31 @@
 # DeepSeek Delegation Contract Template
 
-Copy this template into the worker dispatch and fill every section. Keep it one coherent bundle.
+Use one contract per worker stream.
 
 ```text
+TASK ID
+<stable short id>
+
+ROLE
+implementer | investigator | reviewer | integrator
+
 GOAL
-<one outcome>
+<one observable outcome>
 
 WHY
 <user/product intent if relevant>
+
+WORKSPACE
+<absolute writable repo/worktree path, branch, and exact baseline SHA>
+
+OWNERSHIP
+- files/modules this worker may change
+
+NO-TOUCH PATHS
+- files/modules owned by other workers or shared surfaces that must remain unchanged
+
+DEPENDENCIES
+- none for true parallel dispatch, or list prerequisite already satisfied
 
 SCOPE
 - ...
@@ -23,6 +41,9 @@ ACCEPTANCE CRITERIA
 
 KNOWN RELEVANT PATHS
 - ...
+
+LOCAL_COMMIT
+no | yes (only for explicitly isolated worktree mode)
 
 VERIFICATION
 - run the relevant tests/build/lint/typecheck
@@ -30,57 +51,73 @@ VERIFICATION
 
 RETURN FORMAT
 - STATUS: ready_for_review | blocked | failed
-- SUMMARY: concise
+- TASK ID + workspace
+- SUMMARY
 - CHANGED: paths + behavior
+- LOCAL COMMIT SHA: only when requested
 - VERIFICATION: command + outcome
-- RISKS/BLOCKERS: only unresolved items
-- ROOT/USER DECISIONS: only if genuinely required
+- RISKS/BLOCKERS
+- ROOT/USER DECISIONS
 ```
 
-Rules for the dispatch:
+## Dispatch rules
 
-- Do not send progress updates. The root waits once.
-- The worker owns repository discovery, implementation, testing, debugging, and routine verification inside the stated scope.
-- The worker does not spawn nested agents, commit, push, deploy, or expand scope without authorization.
-- The worker must not claim a command ran when it did not. Report the real exit status.
-- If the bundle is under-specified, the worker reports a blocker instead of redesigning the system.
+- No progress polling.
+- The worker owns repository discovery, implementation, testing, debugging, and routine verification inside the assigned scope.
+- The worker is not alone in the codebase. Name the other streams and their
+  ownership; do not revert others' work. Respect ownership/no-touch boundaries.
+- Children do not invoke the orchestration skill or delegate further.
+- Legacy single-worker briefs remain valid: use the current workspace, one
+  writer, and no commit permission when the new metadata is absent.
+- Workers must not modify `.codex/PROJECT_STATE.md`.
+- Local commits are allowed only when `LOCAL_COMMIT: yes` is explicit and the worker is in an isolated workspace.
+- A local commit never authorizes push/publish/deploy.
+- Under-specification is a blocker, not permission to redesign adjacent systems.
 
-## A concrete example
+## Integrator contract
+
+For multiple writers, stop/close completed children, then use one
+`deepseek_integrator` contract (legacy `deepseek_worker` ROLE=integrator works):
 
 ```text
+ROLE
+integrator
+
 GOAL
-Add CSV export to the report page and cover it with a test.
+Combine the completed worker streams into one integration workspace and verify the combined behavior.
 
-WHY
-Users currently copy numbers out of the table by hand; support asks for a file download.
+WORKSPACE / BASELINE / LOCAL_COMMIT
+- integration worktree, branch, exact baseline SHA
+- LOCAL_COMMIT: no unless explicitly authorized
 
-SCOPE
-- server route that streams the current report as CSV
-- download control on the report page
-- one test for the route
+OWNERSHIP / NO-TOUCH PATHS
+- exact integration write scope; .codex/PROJECT_STATE.md is always no-touch
 
-NON-GOALS
-- no new export formats
-- no changes to the report query
-- no styling work beyond the single control
+INPUTS (exact SHAs or complete patches, application order)
+- task A workspace/commit
+- task B workspace/commit
+- optional task C workspace/commit
 
-CONSTRAINTS / CONTRACTS
-- the existing report JSON shape must not change
-- reuse the existing auth middleware
+GLOBAL ACCEPTANCE CRITERIA
+- ...
 
-ACCEPTANCE CRITERIA
-- GET /reports/:id/export.csv returns text/csv with a header row and one row per record
-- unauthenticated requests keep returning 401
-- the page control triggers a download with the current filter applied
+INTEGRATION AUTHORITY
+- may apply/cherry-pick local worker commits or patches
+- may resolve routine merge conflicts that preserve the established contracts
+- may run integration tests and fix ordinary integration-only failures
+- must escalate product/architecture ambiguity to Sol
 
-KNOWN RELEVANT PATHS
-- src/reports/routes.ts
-- src/reports/ReportPage.tsx
-
-VERIFICATION
-- run the repository's test and lint commands for the touched packages
-- fix ordinary in-scope failures before reporting
+PROHIBITED
+- no push/publish/deploy
+- no credentials/secrets changes
+- no PROJECT_STATE changes
 
 RETURN FORMAT
-- STATUS / SUMMARY / CHANGED / VERIFICATION / RISKS / DECISIONS
+- STATUS
+- INTEGRATED SUMMARY
+- CHANGED PATHS
+- CONFLICTS RESOLVED
+- CONFLICTS/DECISIONS REQUIRING SOL
+- VERIFICATION
+- RISKS
 ```
