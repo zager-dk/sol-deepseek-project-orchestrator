@@ -93,7 +93,22 @@ Say so, or just ask for it plainly. Formatting, a one-line fix, or a copy change
 should be done directly by the root. The architecture document explains the
 threshold in [the small-task exception](ARCHITECTURE.md#small-task-exception).
 
-## 8. Before ending a session
+## 8. Try adaptive work after one successful single-worker task
+
+Install with `--adaptive` and verify with `--adaptive --self-test`. Keep the
+same prompt style: the root chooses 1, 2, or 3 workers and explains its choice
+briefly. Ask for parallel work only when independent streams exist. The root
+freezes shared contracts, gives writers isolated paths with disjoint ownership,
+waits for all outputs, and starts one DeepSeek integrator. Sol reviews one
+consolidated result and uses at most one correction phase total.
+
+See [parallel-work-example.md](examples/parallel-work-example.md) and
+[WORKTREE_PROTOCOL.md](skill/references/WORKTREE_PROTOCOL.md) for a complete
+example, explicit local-commit authority, and safe workspace preparation.
+If the root cannot dispatch inside the isolated writable paths, keep one writer.
+Do not paste keys or move secret files into those workspaces.
+
+## 9. Before ending a session
 
 The root updates `.codex/PROJECT_STATE.md` if anything durable changed. If the
 `Stop` hook notices repository changes and a stale state file, it asks for one

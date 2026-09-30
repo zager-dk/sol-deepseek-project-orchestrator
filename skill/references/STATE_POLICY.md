@@ -21,6 +21,10 @@ Durable decisions and non-goals. Prefer bullets with a short reason when the rea
 ### Active work
 What is currently in progress or just accepted but not fully integrated.
 
+For adaptive work, keep a short topology/reason, common baseline, task/branch
+IDs, integration status, and remaining correction budget (0 or 1). Keep machine
+paths and full logs in the local workspace manifest, not durable state.
+
 ### Known issues / risks
 Only unresolved items that matter to future work.
 
@@ -43,7 +47,10 @@ Last semantic update date/time and, when useful, branch/commit reference. Metada
 
 ## Ownership
 
-The root model owns this file. A worker may update it only when the dispatch explicitly says so, and even then only inside the named sections.
+The root model owns this file. Workers and integrators do not modify it.
+They report state-relevant facts; the root records accepted outcomes. Give
+isolated children a sanitized snapshot in their briefs. Do not merge stale
+worktree copies back into canonical state.
 
 ## Lifecycle
 

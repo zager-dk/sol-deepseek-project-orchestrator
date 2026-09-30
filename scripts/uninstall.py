@@ -102,6 +102,19 @@ def remove_file(path: Path, dry_run: bool) -> str:
     return "removed"
 
 
+def remove_agent(path: Path, dry_run: bool) -> str:
+    """Keep customized or older agent definitions for manual review."""
+    if not path.is_file():
+        return "absent"
+    source = REPO_ROOT / "templates" / "agents" / path.name
+    try:
+        if path.read_bytes() != source.read_bytes():
+            return "kept: agent differs from bundled definition"
+    except OSError as exc:
+        return f"failed: {exc}"
+    return remove_file(path, dry_run)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
@@ -114,8 +127,11 @@ def main(argv: list[str] | None = None) -> int:
     results["skill"] = remove_path(
         codex_home / "skills" / SKILL_NAME, args.dry_run
     )
-    results["agent"] = remove_file(
+    results["agent"] = remove_agent(
         codex_home / "agents" / AGENT_FILE_NAME, args.dry_run
+    )
+    results["integrator"] = remove_agent(
+        codex_home / "agents" / "deepseek-integrator.toml", args.dry_run
     )
 
     hooks_dir = project / ".codex" / "hooks"

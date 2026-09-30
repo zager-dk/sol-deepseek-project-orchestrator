@@ -25,161 +25,170 @@ A single strong model doing everything in one context has three costs:
 3. **Verification weakness.** A model that wrote the code and then reviewed its
    own work tends to confirm its own assumptions.
 
-The thin-root workflow addresses all three by splitting one job into two roles
+The thin-root workflow addresses all three by splitting one job into bounded execution and root judgement
 and making the boundary between them explicit.
 
 ## The shape of it
 
 ```text
-user (direction, product judgement, approvals)
-        |
-        v
-ROOT MODEL  (preferred: GPT-5.6 Sol at high reasoning)
-            technical lead, orchestrator, integrator
-        |            one scope pass -> one dispatch -> one wait
-        |            -> one batched review -> at most one correction
-        v
-WORKER MODEL (DeepSeek V4.1 Flash: implementation, tests, debugging)
-        |
-        v
-repository:  code  +  .codex/PROJECT_STATE.md  (durable memory)
+User: product intent and permissions
+         ↓
+GPT-6.1 Sol: scope + contracts + adaptive choice
+         ↓
+  SINGLE                 PARALLEL-2 / PARALLEL-3
+  one Flash worker       2–3 Flash workers in separate worktrees
+         ↓                        ↓ (all complete and stopped)
+  completion report      one Flash integrator in a separate worktree
+         ↓                        ↓
+         └──────── combined result / verification ────────┘
+                                  ↓
+                  one Sol acceptance review
+                  at most one correction phase
+                  root-owned PROJECT_STATE update
 ```
 
-Two roles, one repository, one durable state file. The chat is temporary; the
-repository is not.
+One writer remains the default. The integrator runs after the writers finish,
+so there are at most three active DeepSeek children at once. Release finished
+child slots before starting the integrator. Wait APIs may return on one child
+or time out; continue waiting for outstanding children, without progress polls.
 
 ## Responsibilities
 
 ### The user
 
-- Owns the product vision, priorities, and taste.
-- Approves anything irreversible, external, or expensive.
-- Does **not** manage agent logistics. Which agent runs which step, how many
-  correction cycles happened, and what the verification command was are the
-  root's job to handle.
+The user owns product direction and authorizes spending, publication, and
+destructive actions. Already supplied authorization persists; do not ask again
+for the same action. The root handles agent logistics and routine technical
+choices. An explicit request for no delegation wins over this workflow.
 
 ### The root model
 
-**Preferred root: GPT-5.6 Sol at high reasoning.** That pairing is the intended
-shape of this workflow, and it is what the bundled skill assumes when it talks
-about a thin root: a strong, expensive model doing scope, contracts, judgement,
-and acceptance, and nothing mechanical.
+Preferred root: **GPT-6.1 Sol, high reasoning, Standard speed**. GPT-5.6 Sol
+and user-selected capable roots remain supported. The installer never switches
+the root model or escalates reasoning/speed. Confirm available settings in your
+installed client; these are starting preferences, not measured performance claims.
 
-The preference is a default, not a lock. If you select a different root model,
-the workflow still applies, because the boundary is defined by responsibilities
-rather than by a model name. What does not change is the worker side: the
-implementation worker is DeepSeek V4.1 Flash, dispatched through an explicit
-route. If routing to that worker is unavailable, report it instead of silently
-substituting another paid model.
+The root owns scope, interfaces, architecture, security decisions, final
+acceptance, and semantic updates to `.codex/PROJECT_STATE.md`. It reads compact
+state and enough repository context to establish a contract, then lets workers
+own in-scope discovery, implementation, testing, and debugging. It does not
+repeat that loop or separately review every worker by default.
 
-The root is a technical lead who delegates the build and keeps the review. In
-one substantial task the root normally does exactly this:
+### Implementation workers
 
-1. **Scope and contract pass.** Read the existing durable state, inspect only
-   enough of the repository to fix the goal, scope, non-goals, stable
-   interfaces, acceptance criteria, and high-risk constraints. Deliberately do
-   not read the whole tree.
-2. **One coherent dispatch.** Write a single worker brief covering the whole
-   bundle, including the verification the worker must run.
-3. **One wait.** Wait for the completion report. No polling, no progress
-   requests, no interrupting a healthy run.
-4. **One batched acceptance review.** Judge the finished diff and the evidence,
-   under two lenses at once: specification compliance, and quality (security,
-   regressions, architecture, maintainability) proportional to the change.
-5. **At most one batched correction.** If the review found problems, send every
-   concrete finding in a single request. Do not drip-feed.
-6. **One final response**, plus the durable state update.
+Each DeepSeek V4.1 Flash worker gets a coherent outcome and explicit ownership.
+It investigates, implements, verifies, fixes ordinary failures, and returns
+`ready_for_review`, `blocked`, or `failed`, with paths and real command results.
+It is not alone in the codebase: it must respect the other streams and must not
+revert their changes. No nested agents, orchestration skill, unapproved commits,
+remote writes, credentials changes, or persistent-state edits.
 
-The root keeps architecture decisions, security judgement, public contracts,
-and integration. It does not rewrite the worker's code line by line unless the
-review demands it.
+### The DeepSeek integrator
 
-### The worker model
+For multiple code-producing workers, one `deepseek_integrator` combines exact
+local SHAs or complete patches in the designated integration worktree. Its brief
+authorizes application and names allowed integration edits. It checks baseline,
+ownership, missing inputs, and forbidden state changes before applying them.
+Then it resolves routine conflicts under the frozen contracts, runs combined
+verification, and returns one report. It escalates architecture, product, and
+security ambiguity. It cannot approve the result or change persistent state.
 
-- Owns repository discovery inside the assigned scope.
-- Implements the bundle end to end, writes or updates tests, runs the named
-  checks, diagnoses failures, and iterates inside scope before reporting.
-- Reports once: status, summary, changed paths, verification commands with real
-  exit status, unresolved risks, and decisions that genuinely need the root.
-- Does not spawn nested agents, commit, push, deploy, or widen scope.
-- Reports a missing contract as a blocker instead of inventing one.
+Single-worker tasks skip this pass. Legacy installs may use `deepseek_worker`
+with `ROLE=integrator` under the same contract; the optional separate role makes
+the integration responsibility easier to discover and bound.
 
-The worker is not a smaller version of the root. It is a different job: bounded
-execution against a contract that someone else already established.
+## Adaptive parallelism
+
+| Choice | Worker count | Decision |
+| --- | ---: | --- |
+| DIRECT | 0 | The edit is cheaper than delegation overhead |
+| SINGLE | 1 | Default substantial task; shared mutable surfaces or uncertain interfaces |
+| PARALLEL-2 | 2 | Two streams can start now and have disjoint write ownership |
+| PARALLEL-3 | 3 | Three independent streams, isolation, and enough expected time benefit |
+
+The root records its choice and a short reason in the dispatch. Available slots
+are not a reason to parallelize. Independence requires stable interfaces, no
+start dependency between streams, separate acceptance criteria, and one bounded
+integration pass. Shared migrations, lockfiles, schemas, generated files, and
+central configuration must have one owner. Finish a shared prerequisite first
+or keep a single writer. Worktree separation prevents file races; it does not
+make dependent changes logically independent.
+
+Use distinct branches/worktrees for concurrent writers. If the client cannot
+dispatch a worker into the named writable workspace, keep one writer; do not
+loosen permissions. Read-only helpers must also have bounded ownership and stay
+within the same three-child cap. See `references/PARALLELISM_POLICY.md` in the
+installed skill and `skill/references/PARALLELISM_POLICY.md` in this repository.
 
 ## The dispatch sequence
 
-```text
-scope pass
-   |
-   +--> dispatch (one brief, one bundle, one wait)
-           |
-           +--> worker: discover -> implement -> test -> fix -> report
-                   |
-                   +--> review (one batch, two lenses)
-                           |
-                           +--> accept  -> update PROJECT_STATE -> final answer
-                           |
-                           +--> correct (one batch of findings)
-                                   |
-                                   +--> re-review the delta only
-                                           |
-                                           +--> accept, or escalate the
-                                                genuine blocker to the user
-```
+1. **Scope once.** Read durable state. Freeze shared contracts, acceptance,
+   risk constraints, and non-goals. Choose DIRECT, SINGLE, PARALLEL-2, or PARALLEL-3.
+2. **Prepare and dispatch.** For parallel writers, establish a clean committed
+   baseline, isolated paths/branches, ownership and no-touch paths, verification,
+   and transfer protocol. Dispatch 1–3 coherent briefs in one phase.
+3. **Wait for all.** Collect completion reports; stop/close finished children
+   with the client-supported lifecycle API. Preserve outputs of failed streams.
+   Do not interrupt healthy work or silently accept an incomplete subset.
+4. **Integrate once when needed.** Dispatch one DeepSeek integrator after all
+   writers stop. Supply exact inputs, global acceptance criteria, and combined
+   checks. A missing or blocked stream makes the global bundle incomplete.
+5. **Review once.** Sol reviews the consolidated diff and evidence for both
+   specification compliance and quality/security proportional to the risk.
+6. **Correct at most once.** Batch every concrete finding. Prefer one correction
+   writer in the integration workspace. If corrections need isolated streams,
+   integrate their deltas within the same correction phase before re-reviewing.
+7. **Accept and persist.** Review the correction delta if any, then update
+   root-owned state and report outcome/limitations. Commits, push, PR, and deploy
+   remain governed by the user's authorization; acceptance alone is not permission.
 
-The counters matter. Six steps, not one per file. One correction cycle, not an
-unbounded repair loop. If the same problem survives one focused correction, the
-faithful move is to diagnose at the root and escalate, not to keep re-dispatching
-the same failing approach.
+One integration pass refers to the initial bundle. Necessary reintegration of
+the single correction is part of that correction, not a fresh orchestration loop.
+If a material blocker survives correction, diagnose it and return the concrete
+decision or fix at the root. Do not restart an unbounded worker loop.
+
+## Worktree and transfer protocol
+
+Every writer and the integrator start at the same full commit SHA. Local Git
+worktrees share object storage but have separate files and indexes. They provide
+write isolation, not a security sandbox. Credentials, network permissions, and
+provider data sharing still need their usual controls.
+
+Prefer managed Codex worktrees when your client exposes a supported way to
+dispatch into them. The installed `scripts/prepare_worktrees.py` is an offline
+fallback: preflight, 1–3 worker branches, an integrator branch for parallel tasks,
+and a local manifest. It refuses dirty/unborn roots, nested paths, branch/task
+collisions, and submodule projects. It never commits, merges, publishes, stashes,
+copies uncommitted files, or deletes worktrees. Partial failures are retained.
+
+The root verifies the output paths are writable in the current session and puts
+them in each brief. Ignored local files and uncommitted project state are not
+copied into worktrees. Supply a sanitized state/contract snapshot to each child.
+Never copy secret files into task workspaces to make setup easier.
+
+For transfer, explicitly grant `LOCAL_COMMIT: yes` only inside an isolated task
+branch, if compatible with user/repository policy. A worker stages only named
+owned files and returns its exact SHA. Without that permission, use a complete
+reviewed patch including new/deleted/binary files, or stay with one writer.
+`git diff` alone omits untracked files and is not a complete transfer artifact.
+The integrator receives these exact inputs and can use `cherry-pick --no-commit`
+to produce a combined staged diff without committing. Root approval remains
+required before acceptance. See the full
+[worktree protocol](skill/references/WORKTREE_PROTOCOL.md) for commands and cleanup.
 
 ## The worker brief
 
-The brief is the contract. It is the single most important artifact in the
-workflow, because it is the only thing the worker is accountable to. A brief
-that is vague produces work the root then has to redo.
+Use `skill/references/DELEGATION_CONTRACT.md`: TASK ID, ROLE, GOAL, WHY,
+WORKSPACE + branch + baseline, OWNERSHIP, NO-TOUCH PATHS, DEPENDENCIES, SCOPE,
+NON-GOALS, CONTRACTS, ACCEPTANCE, LOCAL_COMMIT, VERIFICATION, RETURN FORMAT.
+Every parallel worker must be told that other workers exist and what they own.
+Old single-worker GOAL/SCOPE/VERIFICATION briefs remain valid; fill missing
+metadata from the actual workspace and keep one writer with no commit authority.
 
-```text
-GOAL
-    one outcome, stated as something observable
-
-WHY
-    user or product intent, when it changes what "good" means
-
-SCOPE
-    the work that is inside this bundle
-
-NON-GOALS
-    adjacent work that must not be touched
-
-CONSTRAINTS / CONTRACTS
-    interfaces, shapes, invariants, and safety rules that must survive
-
-ACCEPTANCE CRITERIA
-    how the root will decide the bundle is done
-
-KNOWN RELEVANT PATHS
-    only when it saves the worker real time
-
-VERIFICATION
-    the commands to run, and the instruction to fix ordinary failures first
-
-RETURN FORMAT
-    STATUS / SUMMARY / CHANGED / VERIFICATION / RISKS / DECISIONS
-```
-
-Three rules for writing it:
-
-- **One bundle.** A bundle is a coherent unit of work: a feature, a migration, a
-  cross-component bug fix, a refactor. Not "add the type", "then add the test",
-  "then run it".
-- **Acceptance criteria are checkable.** "Works well" is not a criterion.
-  "Unauthenticated requests still return 401" is.
-- **Non-goals are explicit.** Most scope creep is not malice; it is a worker
-  solving an adjacent problem nobody asked about.
-
-See `skill/references/DELEGATION_CONTRACT.md` for the copy-paste template and a
-filled example.
+A good brief names observable acceptance conditions and one coherent outcome.
+The worker may discover relevant files inside scope, but must ask the root about
+an ownership expansion. Integrator briefs additionally name exact source SHAs
+or patches, ordering, allowed integration edits, and global verification.
 
 ## Review and correction rules
 
@@ -247,8 +256,8 @@ Update in place. Delete stale bullets. Keep it under about 10 KB; the hook warns
 past 14 KB. If the file grows into a journal, it stops being memory and becomes
 another context problem.
 
-The root owns the file. A worker may touch it only when the brief says so
-explicitly.
+The root owns the file. Workers and integrators return state-relevant facts
+in their reports; only the root makes semantic state updates after acceptance.
 
 ## Small-task exception
 

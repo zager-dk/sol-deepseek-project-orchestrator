@@ -1,161 +1,209 @@
 ---
 name: sol-deepseek-project-orchestrator
-description: Use for substantial coding work when a strong root model should stay a thin technical lead and orchestrator while one DeepSeek V4.1 Flash native subagent owns repository discovery, implementation, testing, debugging, and routine verification. Preferred root is GPT-5.6 Sol at high reasoning; another root model works if the user selects one. Keeps a compact durable project state across chats and compaction.
+description: Use for substantial coding work when GPT-6.1 Sol should stay a thin technical lead/orchestrator while 1-3 DeepSeek V4.1 Flash native subagents own repository discovery, implementation, testing, debugging, and routine integration. Chooses worker concurrency adaptively and maintains compact durable project state across chats and compaction.
 ---
 
-# Sol + DeepSeek Project Orchestrator
+# GPT-6.1 Sol + DeepSeek Adaptive Project Orchestrator
 
-Long-form explanation of this workflow, for humans and for other models:
+Use this workflow for substantial implementation, multi-file features, debugging across components, migrations, refactors, or work that may contain independent streams.
 
-- `ARCHITECTURE.md` - installed next to this file, and published in the repository.
-- `references/ROUTING.md` - how the worker role is wired to DeepSeek, and what to do when routing is unavailable.
-- `references/DELEGATION_CONTRACT.md` - the worker brief template.
-- `references/STATE_POLICY.md` - the durable state schema.
+The user is the product/vision supervisor. GPT-6.1 Sol is the technical lead and orchestrator. DeepSeek V4.1 Flash is the implementation worker.
 
-Use this workflow for substantial implementation, multi-file features, debugging across components, migrations, or refactors.
+Read these references when relevant:
 
-The user is the product and vision supervisor. The root model is the technical lead and orchestrator. DeepSeek is the implementation worker.
+- `references/DELEGATION_CONTRACT.md`
+- `references/PARALLELISM_POLICY.md`
+- `references/STATE_POLICY.md`
+- `references/ROUTING.md`
+- `references/MODEL_NOTES.md`
+- `references/WORKTREE_PROTOCOL.md`
+- `ARCHITECTURE.md` (installed adjacent; complete English explanation)
 
-## Core topology
+## Root configuration
 
-Root -> one DeepSeek V4.1 Flash worker -> root acceptance review.
+Prefer **GPT-6.1 Sol High, Standard speed** for routine orchestration.
+GPT-5.6 Sol and a user-selected capable root remain supported. Do not change
+the selected root automatically. A current request for no delegation wins.
 
-**Preferred root: GPT-5.6 Sol at high reasoning.** This is the intended shape of
-the workflow: the expensive model spends its effort on scope, contracts,
-judgement, and acceptance, while mechanical execution goes to the worker. If the
-user selects a different root model, apply the same rules under that model; the
-user's choice wins and no re-planning is needed.
+Do not raise root reasoning to xhigh/max or enable faster/more expensive modes by default. Escalate only when the task justifies additional model work.
 
-The worker side is not a preference. The implementation worker is DeepSeek V4.1
-Flash, reached through an explicitly configured route.
+Use the explicitly configured DeepSeek route (for example `deepseek_worker`; legacy `astra_flash_builder` may be treated as an alias when it maps to the same DeepSeek V4.1 Flash worker). Never silently substitute another paid worker model when the DeepSeek route is unavailable.
 
-Use a native custom subagent whose `model` is an explicitly configured DeepSeek route, for example the `deepseek_worker` agent shipped in this repository (`templates/agents/deepseek-worker.toml`). Pass the route explicitly when you dispatch. Historical installations may still carry the legacy role name `astra_flash_builder`; treat that name as an alias for the same worker job, not as a different role.
+## Adaptive topology
 
-Never silently substitute another paid model when the DeepSeek route is unavailable. Report the routing problem instead of falling back.
+Default worker count is **1**.
+
+The root may choose **2 workers** when there are two independent workstreams with clean ownership and parallel execution will materially reduce wall-clock time.
+
+The root may choose **3 workers** only when there are at least three genuinely independent workstreams, the write surfaces can be isolated, and integration overhead is justified.
+
+Never increase concurrency just because slots are available.
+
+See `references/PARALLELISM_POLICY.md` for the decision rules.
 
 ## Thin-root rule
 
-For a substantial task, the root should normally perform exactly:
+For a substantial task, the root should normally perform:
 
-1. One scope and contract pass.
-2. One coherent worker dispatch.
-3. One wait for completion; do not poll or request progress updates.
-4. One batched acceptance review.
-5. At most one batched correction dispatch when needed.
-6. One final response to the user.
+1. one scope/contract pass;
+2. one adaptive dispatch phase (spawn 1-3 workers as justified);
+3. one wait for all dispatched workers; do not poll or request progress updates;
+4. when multiple writers were used, one DeepSeek integration pass;
+5. one batched acceptance review over the integrated result;
+6. at most one batched correction phase when needed;
+7. one durable project-state update and one final response.
 
-Do not duplicate the worker's repository discovery, implementation loop, or full validation unless there is concrete evidence that the worker missed something important.
+Do not duplicate worker repository discovery, implementation loops, or full validation unless there is concrete evidence that something important was missed.
+
+Do not independently review each worker when a successful integration pass has already produced one consolidated diff/report. Review worker-specific output only when the integrator flags a concrete concern.
 
 ## Before delegation
 
-Read `.codex/PROJECT_STATE.md` if it was not already injected by the session hook.
+Read `.codex/PROJECT_STATE.md` if it was not already injected.
 
 Inspect only enough repository context to establish:
 
 - goal and user-visible outcome;
 - scope and non-goals;
-- interfaces and contracts that must remain stable;
+- interfaces/contracts that must remain stable;
 - acceptance criteria;
 - high-risk constraints;
-- relevant paths if already known.
+- natural independent workstreams, if any;
+- paths/modules that must not be edited concurrently.
 
-Do not read the whole repository merely to prepare the brief. Let the worker own in-scope discovery.
+Do not read the whole repository merely to prepare worker briefs.
+
+## Parallelism decision
+
+Classify the task before dispatch:
+
+### DIRECT
+Use no worker for trivial, clearly local edits where orchestration costs more than the change.
+
+### SINGLE
+Use one DeepSeek worker for one coherent implementation stream. This is the default for substantial coding work.
+
+### PARALLEL-2
+Use two workers only when there are two independent streams with explicit ownership and no dependency between their start conditions.
+
+### PARALLEL-3
+Use three workers only when all three streams are independent and the expected wall-clock gain clearly exceeds coordination/integration cost.
+
+If several agents would edit the same core files, shared schema, migration, lock file, generated artifact, or dependency surface, do not parallelize those writes.
+
+## Workspace isolation
+
+Multiple concurrent writers require separate Git worktrees/branches at the
+same clean committed baseline and explicit disjoint ownership. Confirm each
+child can execute inside its named writable path; otherwise use one writer.
+See `references/WORKTREE_PROTOCOL.md`; the installed offline helper is
+`scripts/prepare_worktrees.py`. No automatic stash, copying dirty files, or
+permission expansion.
+
+Each writer brief must contain:
+
+- TASK ID
+- ROLE
+- WORKSPACE / branch/worktree when available
+- OWNERSHIP (allowed paths/modules)
+- NO-TOUCH PATHS
+- dependencies on other streams (normally none for parallel dispatch)
+- acceptance criteria
+- verification expectations
+
+If isolated writer workspaces are not available, use one writer. Additional workers may still be used for read-only investigation or review.
+
+Workers must not edit `.codex/PROJECT_STATE.md`.
 
 ## Worker brief
 
-Delegate one coherent implementation bundle, not a sequence of tiny steps. See `references/DELEGATION_CONTRACT.md` for the template. Include:
+Delegate coherent bundles, not tiny sequential instructions. See `references/DELEGATION_CONTRACT.md`.
 
-- GOAL
-- WHY / user intent when relevant
-- SCOPE and NON-GOALS
-- CONSTRAINTS and contracts
-- ACCEPTANCE CRITERIA
-- KNOWN RELEVANT PATHS only when useful
-- VERIFICATION expectations
-- RETURN FORMAT
+Tell each worker to investigate its assigned repository area, implement, test, diagnose ordinary failures, iterate within scope, and return one concise completion report rather than play-by-play updates.
 
-Tell the worker to investigate the relevant repository area itself, implement, test, diagnose failures, iterate within scope, and return one concise completion report rather than play-by-play updates.
-
-The worker should return:
+The worker report should contain:
 
 - STATUS: ready_for_review | blocked | failed
+- TASK ID and workspace
 - concise summary
-- changed paths
+- changed paths/behavior
 - verification commands and outcomes
-- unresolved risks and blockers
-- decisions that genuinely require the root or the user
+- unresolved risks/blockers
+- exact baseline and local commit SHA (or complete patch) when isolated transfer is requested
+- decisions genuinely requiring the root/user
+
+## Integration pass
+
+Skip this for a single writer.
+
+When multiple workers produced code, stop/close completed children and delegate
+one integration bundle to `deepseek_integrator` before Sol reviews. Legacy
+setups may use `deepseek_worker` with ROLE=integrator under the same constraints.
+Wait for all streams, even if a wait call returns early on one child. Release
+finished slots before dispatching the integrator; never exceed three active
+children. Do not invoke this orchestration workflow from a child.
+
+The integrator may, when explicitly authorized by the dispatch:
+
+- inspect worker branches/worktrees/local commits;
+- cherry-pick or apply the selected local changes into the designated integration workspace;
+- resolve routine conflicts that do not change product/architecture intent;
+- run the relevant integration verification;
+- report one consolidated status/diff/verification summary.
+
+The integrator must not push, publish, deploy, change credentials, or update `.codex/PROJECT_STATE.md`.
+
+If integration exposes an architectural conflict, contract ambiguity, or product choice, stop and return it to Sol instead of inventing a resolution.
 
 ## Acceptance review
 
-Review the finished diff and evidence in one batch.
+Sol reviews the integrated result once.
 
-Check two lenses together:
+Check together:
 
-1. specification and acceptance compliance;
+1. specification/acceptance compliance;
 2. quality, regressions, security, architecture, and maintainability proportional to the task.
 
-Do not automatically rerun the worker's entire validation suite. Rerun a focused check only when evidence is missing, suspicious, or high-risk.
+Do not automatically rerun the full validation suite. Rerun focused checks only when evidence is missing, suspicious, high-risk, or integration touched shared surfaces.
 
-If fixes are needed, send all concrete findings in one correction request. Default to one correction cycle. If the same problem remains after a focused correction, diagnose at the root and escalate only when necessary.
+If fixes are needed, send all concrete findings in one correction phase. Use parallel correction only if the findings are again independent and isolated. Use one correction phase total, including necessary reintegration of corrected
+deltas. Re-review that delta; do not start another review/correction loop.
 
 ## Durable project memory
 
-`.codex/PROJECT_STATE.md` is the canonical durable working memory for the project. It is state, not history.
+`.codex/PROJECT_STATE.md` is canonical durable working memory. It is state, not history.
 
-The root owns this file. The worker must not rewrite it unless the brief explicitly delegates a narrow state update.
+Only the root owns semantic updates to this file. Workers and integrators must
+not modify it. Supply sanitized state to isolated children in the brief and
+record accepted integration status, verification, and next steps at the root.
 
-Before finishing a turn, update PROJECT_STATE when the accepted work or discussion materially changes any of:
+Update state after accepted material changes to:
 
 - current milestone or feature status;
-- architecture, public contracts, data model, or major dependencies;
-- durable product and UX decisions;
-- important constraints or non-goals;
-- known blockers, significant bugs, or technical risks;
+- architecture/public contracts/data model/dependencies;
+- durable product/UX decisions;
+- important constraints/non-goals;
+- known blockers/risks;
 - verification baseline;
 - next concrete steps.
 
-Do not record:
-
-- routine command output;
-- transient debugging hypotheses;
-- failed attempts that no longer matter;
-- verbose change logs;
-- conversation history;
-- worker play-by-play.
-
-Edit existing bullets and delete stale state instead of appending a chronological diary. Keep the file compact; target under 10 KB and no more than roughly 200 lines.
-
-The optional project hooks in `hooks/` inject PROJECT_STATE on session start, resume, clear, and after compaction. That is one `SessionStart` hook whose matcher includes the `compact` source, which is the supported way to reach the model after compaction. A Stop hook acts as a safety net: if repository changes occurred during the turn and PROJECT_STATE was not updated, it requests one final state-update pass before the turn ends.
-
-See `references/STATE_POLICY.md` for the exact memory schema.
+Keep it compact (target under 10 KB / roughly 200 lines). Remove stale information instead of appending a diary.
 
 ## User escalation policy
 
-The user should supervise direction, not agent logistics.
-
 Ask the user only when:
 
-- a subjective product or UX choice materially changes the result;
-- requirements conflict in a way that cannot be resolved from repository evidence;
-- an irreversible or destructive operation is required;
+- a subjective product/UX choice materially changes the result;
+- requirements conflict and repository evidence cannot resolve them;
+- an irreversible/destructive action is required;
 - credentials, spending, external publication, production deployment, or secrets require approval;
-- there are materially different architecture options with product consequences;
-- one focused worker correction still leaves a genuine blocker.
+- materially different architecture directions have product consequences;
+- the focused correction phase still leaves a real blocker.
 
 Otherwise make the reasonable technical decision and continue.
 
-## Small tasks
-
-For trivial, clearly local work, the root may do the change itself instead of delegating. Do not summon a worker for formatting, a tiny text change, a simple configuration edit, or a one-line obvious fix.
-
-The orchestration overhead only pays off when a task is large enough that repository discovery, implementation, and verification are genuinely worth delegating.
-
 ## Context discipline
 
-Prefer repository state over chat history. The repository is durable memory; the chat is temporary working memory.
+Prefer repository state over chat history. The repository and PROJECT_STATE are durable memory; chat is temporary working memory.
 
-After a logical milestone, keep PROJECT_STATE current and consider starting a fresh chat rather than carrying obsolete debugging history indefinitely. Automatic compaction is useful, but it is not a substitute for clean durable project state.
-
-## Verification limits
-
-The root should not treat orchestration as verification. A worker report is evidence, not proof: it is a claim about commands that ran and outcomes that were observed. Accept work on evidence you can inspect, and keep any claim you cannot check out of the durable state.
+After a logical milestone, keep PROJECT_STATE current and prefer a fresh chat over carrying obsolete debugging history indefinitely. Automatic compaction is useful, but it is not a substitute for clean durable state.

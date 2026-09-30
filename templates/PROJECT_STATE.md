@@ -26,6 +26,8 @@ _One short paragraph: what this repository or product is trying to achieve._
 ## Active work
 
 - _What is in progress, or accepted but not fully integrated._
+- _For adaptive work: chosen topology/reason, baseline, branch/task IDs,
+  integration status, remaining correction budget (0 or 1). Omit machine paths._
 
 ## Known issues / risks
 

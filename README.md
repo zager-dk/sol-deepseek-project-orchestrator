@@ -1,22 +1,17 @@
 # Sol + DeepSeek Project Orchestrator
 
-A Codex workflow and skill: keep a strong root model - **GPT-5.6 Sol at high
-reasoning is the preferred choice, and any capable root works if you
-select one** - as a **thin technical lead**, and let one **DeepSeek V4.1 Flash
-worker** do the repository discovery, implementation, testing, and debugging
-behind a single written contract.
+Adaptive v0.2 keeps **GPT-6.1 Sol** as a thin technical lead and reviewer,
+while **DeepSeek V4.1 Flash** owns discovery, implementation, tests, and debugging.
+Sol chooses **1–3 workers** based on independence, ownership, and expected time
+benefit. One worker remains the default. Multiple writers use isolated worktrees
+and one DeepSeek integration pass before Sol reviews the combined result.
 
-**[Read the full architecture and workflow document ->](ARCHITECTURE.md)**
+GPT-6.1 Sol with high reasoning and Standard speed is the suggested starting
+profile. Existing GPT-5.6 Sol users can keep their selected root and single-worker
+setup. Installation does not change the selected model, router, or credentials.
 
-That document is the main explanation of the approach: responsibilities, the
-dispatch sequence, the worker brief, review and correction rules, the persistent
-state lifecycle, the small-task exception, routing and verification limits,
-failure handling, and a worked example. Start there if you want to understand
-the idea rather than install it.
-
-Russian summary: [README_RU.md](README_RU.md).
-
----
+Read [ARCHITECTURE.md](ARCHITECTURE.md) for the complete English explanation
+and operational rules. [Русское описание](README_RU.md).
 
 ## What is in the box
 
@@ -24,6 +19,8 @@ Russian summary: [README_RU.md](README_RU.md).
 | --- | --- |
 | `ARCHITECTURE.md` | The long-form design and workflow document. |
 | `skill/` | The Codex skill: `SKILL.md` plus references. Installs to `<codex-home>/skills/`. |
+| `templates/agents/deepseek-integrator.toml` | Optional integration agent (`--adaptive`). |
+| `skill/scripts/prepare_worktrees.py` | Offline worktree preparation with preflight and dry-run. |
 | `templates/agents/deepseek-worker.toml` | Custom subagent that routes to DeepSeek V4.1 Flash. |
 | `templates/PROJECT_STATE.md` | The durable state template copied into your project. |
 | `templates/AGENTS.md` | Example project working agreement. |
@@ -46,7 +43,7 @@ This workflow splits the job:
 - `.codex/PROJECT_STATE.md` holds the durable memory, so a fresh chat starts
   oriented instead of replaying history.
 
-The cost discipline is explicit: one scope pass, one dispatch, one wait, one
+The cost discipline is explicit: one scope pass, one dispatch phase, completion waits, one
 batched review, at most one correction cycle, one final answer.
 
 ## Install in two minutes
@@ -76,16 +73,42 @@ The installer:
 ## The short version
 
 ```text
-Root (Sol class)                 Worker (DeepSeek V4.1 Flash)
-  scope + contract   ---------->  discover, implement, test, fix
-  one batched review <----------  one completion report
-  at most one correction
-  update PROJECT_STATE
+GPT-6.1 Sol: scope, frozen contracts, choose 1–3 streams
+  ├─ one worker: discover → implement → test → report
+  └─ 2–3 isolated workers → DeepSeek integrator → combined verification
+Sol: one batched acceptance review → at most one correction phase
+Sol: update .codex/PROJECT_STATE.md → final response
 ```
 
-The root does not re-explore the repository, does not poll for progress, and
-does not run the worker's whole test suite by reflex. The worker does not spawn
-agents, commit, push, or widen scope.
+| Choice | When it earns its overhead |
+| --- | --- |
+| Direct (0 workers) | A tiny local change |
+| Single (1 worker, default) | One coherent stream, shared files, or unresolved interfaces |
+| Parallel (2 workers) | Two independent streams with disjoint ownership |
+| Parallel (3 workers) | Three independent streams and a clear time benefit after integration |
+
+Parallelism can shorten elapsed time. It adds DeepSeek requests and integration
+work, so it does not guarantee a lower total bill. The resource saving mechanism
+is that discovery, coding, debugging, and routine verification move out of the
+root's subscription context. Each user pays for their own routed DeepSeek usage.
+
+The root waits for completion, reviews the integrated result once, and keeps
+final architecture/security judgement. Workers and integrators do not delegate
+or edit persistent state. Local commits need explicit permission in an isolated
+task branch; remote writes need separate user authorization.
+
+## Enable adaptive work (optional)
+
+```bash
+python scripts/install.py --project /path/to/your/repo --codex-home ~/.codex --adaptive --hooks
+python scripts/verify_install.py --project /path/to/your/repo --codex-home ~/.codex --adaptive --self-test
+```
+
+`--adaptive` additionally installs `deepseek_integrator`. It does not launch
+agents or create worktrees. Old install commands still install `deepseek_worker`
+and keep the single-worker path. The existing worker can also handle an explicitly
+briefed `ROLE=integrator` for legacy setups. See [INSTALL.md](INSTALL.md) for
+upgrades and [the worktree protocol](skill/references/WORKTREE_PROTOCOL.md).
 
 ## Requirements
 
@@ -95,7 +118,7 @@ agents, commit, push, or widen scope.
 - A router or provider setup that exposes a DeepSeek V4.1 Flash model id to
   Codex (for example the Codex Router). Verify the exact slug against your own
   model picker; the bundled value is a starting point, not a guarantee.
-- Git, for the `Stop` hook's change detection. Everything else works without it.
+- Git for worktree isolation/local integration and the `Stop` hook. The installer and single-worker policy can be used without Git.
 
 ## Router configuration
 
