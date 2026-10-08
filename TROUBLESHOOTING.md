@@ -1,166 +1,71 @@
 # Troubleshooting
 
-Symptoms first, then the fix.
+## The installer requests a Codex home
 
-## Installation
+Pass `--codex-home PATH` explicitly or set `CODEX_HOME`. The installer does not infer a target. Check the dry-run plan before writing.
 
-### "no Codex home given. Pass --codex-home PATH or set CODEX_HOME."
+## The installer reports a conflict
 
-Intentional. The installer refuses to guess where your Codex home is.
+A managed file differs from the bundled copy. The installer does not clobber an existing unowned file. Nothing is written over a differing managed file unless `--force` is supplied. Inspect the named file first. With `--force`, backups use `.bak`, then `.bak.1`, `.bak.2`, and so on without replacing older backups. Existing `PROJECT_STATE.md`, root `AGENTS.md`, and conflicting project `.codex/hooks.json` are preserved; the hook conflict blocks the install even with `--force`, so merge or remove it manually before retrying.
 
-```bash
-python scripts/install.py --project ~/code/my-project --codex-home ~/.codex
-# or
-CODEX_HOME=~/.codex python scripts/install.py --project ~/code/my-project
-```
+## An old managed file remains after upgrade
 
-On Windows, `$env:USERPROFILE\.codex` is the usual location.
+Use `--prune` only after reading the dry-run plan. It removes unchanged files whose exact paths and hashes are in the shared `.orchestrator-install-registry.json` and whose paths remain on the installer allowlist. Unknown files and unregistered paths stay in place; registry hashes alone do not grant ownership. If an existing `.codex/hooks.json` conflicts, `--force` cannot replace it; merge or remove that file manually, then retry.
 
-### Exit code 3, "Nothing was written"
+## The installer verifier reports that TOML parsing is unavailable
 
-A managed file already exists with different content. The installer writes
-nothing until you decide.
+`verify_install.py` requires Python 3.11+ for the standard-library `tomllib` parser. An older Python reports that the TOML parser is unavailable and does not validate configuration. Use an already available Python 3.11+ interpreter; Python 3.12.14 was available in this environment. This is a verifier requirement, not a requirement for the skill text, role files, installer, or runtime ledger.
 
-```bash
-# Option A: replace the managed files, keeping .bak copies
-python scripts/install.py --project ~/code/my-project --codex-home ~/.codex --force
+## Role files are missing
 
-# Option B: inspect first
-python scripts/install.py --project ~/code/my-project --codex-home ~/.codex --dry-run
-```
+Check that exactly the six child-role TOML files were copied under `<CODEX_HOME>/agents/` and the separate director profile is at `<CODEX_HOME>/orchestrator-director.config.toml`. The runtime is `<CODEX_HOME>/skills/sol-deepseek-project-orchestrator/scripts/orchestrate.py`. If child roles were intentionally omitted with installer `--no-agent`, run `verify_install.py --no-agent` too; otherwise missing roles are reported as errors. This verifier flag allows absent child files but still verifies every role file that exists, including files without installer ownership. If roles are needed, reinstall without installer `--no-agent` after reviewing the dry run. Restart Codex to reload custom agents. The `name` inside each child TOML is the dispatched role name. The director runs as the primary session. `--no-agent` skips the six child definitions, not the director.
 
-`PROJECT_STATE.md` and `AGENTS.md` never participate in this. They are yours.
+## Native desktop pilot is blocked before child calls
 
-### "no config.toml found in <codex-home>"
+The inspected delegated-task route exposes `spawn_agent` with a priority field only; it has no service-tier or role selector. In that route, the skill was read from disk rather than discovered through `skills.list`, and the six TOML roles have not been shown to load into dispatch. Treat the live Standard child-call pilot as blocked until a supported route can load and invoke those roles with Standard. This finding applies to the inspected route, not all Codex desktop chats. A parser accepting `standard`, `default`, or another string is only a syntax/config-load check, not semantic validation of service tier.
 
-A warning, not an error. It usually means the path is not the Codex home you
-think it is. Confirm before continuing.
+## Model unavailable or dispatch fails
 
-### "project does not look like a git repository"
+Check model ID and effort against account/client availability. The templates currently contain `service_tier = "standard"`, but the official Codex TOML reference does not confirm that literal or `default` as the Standard selector. Verify template loading and Standard selection in an isolated desktop pilot; if Standard cannot be confirmed, report the blocker and do not silently choose Fast. The model catalog can change. Do not silently substitute another role. Record the failure and decide whether to wait, correct configuration, or stop. A local verifier cannot prove a live inference will succeed.
 
-The skill and hooks still install. The `Stop` hook cannot detect changes without
-git, so it will stay silent. Run `git init` in the project if you want that
-behavior.
+If an old configuration has `astra_flash_builder`, inspect its TOML: historical installs used that name for a DeepSeek route. It is not the new `astra_consultant` role.
 
-### Repeated installs keep changing the skill directory
+## A task cannot be assigned
 
-Use `--prune` once to remove files that are not part of the current bundle, such
-as references left over from an older version.
+Run `list` or `snapshot --json` and inspect its state, dependencies, and current owner. Assignment requires an unowned ready item and completed dependencies. Resolve the predecessor through integrated review before assigning dependents. Keep a single writer per shared file or serialize conflicting work.
 
-## Hooks
+## Work was interrupted
 
-### Hooks do not run at all
+Keep the current diff. Confirm that the prior agent has stopped, then use `interrupt` and `recover` with a concise handoff that includes existing changes, reproduction, failed attempts, and remaining criteria. Do not clean or overwrite the working directory during recovery.
 
-Check, in order:
+## A review is inconclusive or finds a defect
 
-1. Is hooks support enabled? `[features] hooks = false` in `config.toml` turns
-   them off globally.
-2. Did you trust them? Run `/hooks` and review. Project-local hooks do not run
-   in an untrusted project.
-3. Did the hook definition change since you trusted it? Trust is recorded against
-   the current hook hash, so editing `hooks.json` requires a fresh review.
-4. Does the command in `hooks.json` point at a path that still exists?
+`fail` with a reproducible defect returns it to the owner with the exact observation. Requirement ambiguity, inadequate test scope, or unclear risk goes to the director. Record unrun checks as unrun. The review-round limit should allow the initial review and one correction review. Once exhausted, use the finite `escalate` allowance with `--owner-role sol_senior`, a new owner identity, and the preserved diff, reproduction, and prior attempts, or create a follow-up task. Use `replan` only after the director resolves a blocked requirement; it can record explicit goal, scope, and acceptance updates with the reason, then checks scope conflicts on assignment. Do not repeat the same task indefinitely.
 
-### Hooks stopped working after moving the repository
+## A dependent task remains blocked
 
-Expected. The generated `hooks.json` embeds absolute paths.
+A worker's report or green isolated branch is not enough. Integrate the prerequisite and verify the combined snapshot, then mark it accepted. Only then will dependent work become ready.
 
-```bash
-python scripts/install.py --project /new/path --codex-home ~/.codex --hooks --force
-```
+## State appears stale
 
-### The Stop hook repeats itself
+Compare the `state_fingerprint` marker in `.codex/PROJECT_STATE.md` with `snapshot --json`. It covers HEAD tree, semantic index entries, and dirty content while excluding state/backlog bookkeeping; a state-only commit does not stale the marker, but source HEAD drift does even with a clean worktree. Index stat-cache-only changes do not stale it. Recheck affected paths instead of blindly rereading the whole project. The separate task fingerprint includes the exact HEAD commit ID for review/integration.
 
-It should not. The design allows one nudge per turn, and it stands down whenever
-`stop_hook_active` is set. If you see a loop:
+## Hooks do not run
 
-1. disable it immediately with `SOL_DEEPSEEK_DISABLE_STATE_HOOK=1`;
-2. remove the entry from `.codex/hooks.json`;
-3. clear stale markers from `%TEMP%\sol-deepseek-state-nudge` (or the
-   `SOL_DEEPSEEK_NUDGE_DIR` you configured);
-4. file an issue with the hook's actual stdout.
+1. Confirm `--hooks` was used and `.codex/hooks.json` points to existing scripts.
+2. Review and trust the project hook layer with `/hooks`.
+3. Confirm hooks are enabled in the active Codex configuration.
+4. Run the verifier's `--self-test` in the isolated setup and inspect its result.
 
-### The Stop hook is silent even though I changed files
+The supported state injection uses `SessionStart` sources `startup`, `resume`, `clear`, and `compact`. The Stop hook is a one-shot prompt. A missing marker stays quiet on a clean legacy tree, but a missing or stale marker triggers one nudge when source or HEAD drift exists. SessionStart still includes a stale note for a missing marker. The bundled helper compares content; older hook installs without it retain a timestamp fallback. Hooks do not start or assign agents.
 
-Expected in these cases:
+## Verification is green but acceptance is unclear
 
-- the working tree is clean (uncommitted changes were never made);
-- `PROJECT_STATE.md` is newer than every changed path, so the state is not stale;
-- the session is outside a git repository;
-- git is not installed or not on `PATH`;
-- the one-per-turn guard already fired for this turn.
+Read the command, exit status, and evidence. An unrun check is not green. Confirm that the reviewer checked the integrated code, not just a worker report or a separate branch. The director owns final acceptance.
 
-### `PROJECT_STATE.md` is not injected
-
-- The hook walks up from the session working directory. A state file must be at
-  `<some-parent>/.codex/PROJECT_STATE.md`.
-- An empty state file is treated as absent (nothing to inject).
-- Very large state files are truncated with a visible marker. If you see the
-  marker, compact the file.
-
-## Routing and the worker
-
-### The `deepseek_worker` agent is missing
-
-1. Confirm the file exists: `<codex-home>/agents/deepseek-worker.toml`
-   (`--no-agent` skips it on purpose).
-2. Restart or reopen Codex; custom agent files are read at startup.
-3. Remember the source of truth is the `name` field inside the file, not the
-   filename.
-
-### The worker runs, but not on DeepSeek
-
-Check the model slug.
-
-```toml
-model = "deepseek/deepseek-v4.1-flash"
-```
-
-Router model identifiers are environment-specific. Open your model picker, or
-ask your router CLI to list models, and use the exact slug you see there. The
-bundled value is a starting point.
-
-### The route is unavailable
-
-Report it. Do not silently substitute a different paid model. Acceptable
-responses are: fix the route and dispatch once, ask the user whether to proceed
-with the root model alone, or stop and report the routing evidence.
-
-### The worker returns `blocked`
-
-Read the blocker before reacting. If it is a missing contract, supply it and
-re-dispatch once. If it is genuinely external, tell the user. Do not retry the
-same brief and hope for a different result.
-
-## Workflow quality
-
-### The root keeps rewriting the worker's code
-
-The bundle was too small, or the brief was too vague. Send a larger bundle with
-sharper acceptance criteria.
-
-### The worker's report is thin
-
-The brief is the problem. Add explicit acceptance criteria and an explicit
-verification section, then re-dispatch once.
-
-### The state file keeps growing
-
-Someone is writing history instead of state. Remove command output, logs,
-resolved blockers, and completed work that is now part of the architecture
-section. Update bullets in place; do not append.
-
-### Fixes keep failing after a correction
-
-Stop the loop. After one focused correction, diagnose at the root or escalate
-the real blocker to the user. Repeating the same dispatch is not a strategy.
-
-## Still stuck
+For a complete local diagnostic, run:
 
 ```bash
-python scripts/verify_install.py --project ~/code/my-project --codex-home ~/.codex --self-test
+python scripts/verify_install.py --project /path/to/project --codex-home /path/to/test-codex-home --self-test
+python scripts/orchestrate.py --project /path/to/project snapshot --json
 ```
-
-The verifier reports what exists, what parses, and how the hooks behaved against
-a throwaway repository. That output is the most useful thing to include in an
-issue.

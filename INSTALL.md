@@ -1,169 +1,102 @@
 # Install
 
-Everything here is standard library Python and file copies. No package manager,
-no network, no credentials.
+The installer is standard-library Python. The CLI targets Python 3.9+ and requires a Git working tree with an existing commit for snapshots; this environment verified it with Python 3.10.6. It copies the skill, its bundled local Python ledger CLI, six native child-role definitions, and the separate primary-session profile to explicit destinations. The Python ledger CLI records transitions; the Codex CLI (`codex`) starts model sessions. Optional hooks are project-local. It does not access the network, invoke models, install into a guessed Codex home, or edit `config.toml`.
 
-## Before you start
+## Verify in a disposable environment first
 
-You need:
-
-- Python 3.9 or newer;
-- the path to your Codex home (usually `~/.codex`, or `%USERPROFILE%\.codex`);
-- the path to the project you want to enable;
-- git in the project, if you want the `Stop` hook's change detection.
-
-The installer refuses to guess your Codex home. Pass `--codex-home` explicitly or
-set `CODEX_HOME`. Writing skill files into the wrong directory is annoying to
-clean up, so the installer makes the target explicit instead of assuming.
-
-## Basic install
-
-macOS / Linux:
+Use an existing throwaway project directory and a separate Codex-home path. The Codex home may be created by the installer. The project must be a Git worktree with an existing commit before initializing the ledger.
 
 ```bash
-git clone https://github.com/zager-dk/sol-deepseek-project-orchestrator.git
-cd sol-deepseek-project-orchestrator
-python3 scripts/install.py --project ~/code/my-project --codex-home ~/.codex
+python scripts/install.py --project /tmp/demo-project --codex-home /tmp/demo-codex --dry-run
+python scripts/install.py --project /tmp/demo-project --codex-home /tmp/demo-codex --hooks
+python scripts/verify_install.py --project /tmp/demo-project --codex-home /tmp/demo-codex --self-test
 ```
 
-Windows (PowerShell):
+PowerShell example:
 
 ```powershell
-git clone https://github.com/zager-dk/sol-deepseek-project-orchestrator.git
-cd sol-deepseek-project-orchestrator
-python scripts\install.py --project C:\code\my-project --codex-home "$env:USERPROFILE\.codex"
+python scripts\install.py --project C:\temp\demo-project --codex-home C:\temp\demo-codex --dry-run
+python scripts\install.py --project C:\temp\demo-project --codex-home C:\temp\demo-codex --hooks
+python scripts\verify_install.py --project C:\temp\demo-project --codex-home C:\temp\demo-codex --self-test
 ```
 
-## See the plan first
+Read the full plan. Use `--json` for machine-readable output. Never test installation against your live Codex home unless you have deliberately chosen that target.
 
-```bash
-python scripts/install.py --project ~/code/my-project --codex-home ~/.codex --dry-run
-```
+## Options
 
-A dry run prints every action and writes nothing. `--json` prints the same plan
-as machine-readable output.
-
-## Flags
-
-| Flag | Meaning |
+| Option | Effect |
 | --- | --- |
-| `--project PATH` | Required. The project root to enable. |
-| `--codex-home PATH` | Codex home. Falls back to the `CODEX_HOME` variable. |
-| `--hooks` | Also write project-local hooks and `.codex/hooks.json`. |
-| `--agents-md` | Also drop the example `AGENTS.md` into the project root. |
-| `--no-agent` | Skip `deepseek-worker.toml`; you manage routing yourself. |
-| `--force` | Replace managed files that differ, backing each up as `.bak`. |
-| `--prune` | Remove files inside the installed skill directory that are not in this bundle. |
-| `--dry-run` | Print the plan; write nothing. |
-| `--json` | Machine-readable plan and result. |
+| `--project PATH` | Required project root. |
+| `--codex-home PATH` | Required Codex home unless `CODEX_HOME` is set. |
+| `--hooks` | Add project-local state hooks, their local CLI copy, and generated `.codex/hooks.json`. |
+| `--agents-md` | Add the example root `AGENTS.md` only if none exists. |
+| `--no-agent` | Skip installation of the six bundled child-agent TOML files only; the primary director remains the interactive Codex session. |
+| `--force` | Replace differing managed files and save a unique `.bak`, `.bak.1`, etc. without overwriting earlier backups. User-owned state and `AGENTS.md` are preserved. Existing project `.codex/hooks.json` is protected even with `--force`; merge or remove that conflict manually, then retry. |
+| `--prune` | Remove unchanged, previously recorded files at known managed paths that are no longer in the bundle. Unknown files and unregistered paths are preserved. |
+| `--dry-run` | Show planned operations without writing. |
+| `--json` | Print the plan/result as JSON. |
 
-## What gets written
+Existing configuration, credentials, routing, and user-level hooks remain untouched. The installer records managed paths and hashes in the shared `.orchestrator-install-registry.json`. It uses operating-system locks, does not clobber existing unowned files, and preserves ownership claims when an unlink fails. A checksum alone does not grant ownership. Unknown or unrecognized paths are ignored and preserved. Inspect the registry-aware plan and dry-run uninstall before applying it.
+
+## Installed layout
 
 ```text
 <codex-home>/skills/sol-deepseek-project-orchestrator/
     SKILL.md
     ARCHITECTURE.md
-    references/DELEGATION_CONTRACT.md
-    references/STATE_POLICY.md
-    references/ROUTING.md
+    references/...
+    scripts/orchestrate.py
 
-<codex-home>/agents/deepseek-worker.toml          (unless --no-agent)
+<codex-home>/agents/
+    luna-worker.toml
+    luna-reviewer.toml
+    luna-state-editor.toml
+    sol-senior.toml
+    sol-reviewer.toml
+    astra-consultant.toml
+<codex-home>/orchestrator-director.config.toml
 
-<project>/.codex/PROJECT_STATE.md                  (created once, never replaced)
-<project>/AGENTS.md                                (only with --agents-md, never replaced)
-
-<project>/.codex/hooks/inject_project_state.py     (only with --hooks)
-<project>/.codex/hooks/stop_project_state_check.py (only with --hooks)
-<project>/.codex/hooks.json                        (only with --hooks, generated)
+<project>/.codex/PROJECT_STATE.md             (created only when absent)
+<project>/.codex/ORCHESTRATOR.json            (created by CLI init)
+<project>/.codex/hooks/                       (only with --hooks)
+<project>/AGENTS.md                           (only with --agents-md and absent)
 ```
 
-## What is never written
+With `--hooks`, a copy of the CLI is placed beside the hooks. The hooks use content-aware state fingerprints and task snapshots, not file modification times. Generated commands use platform-appropriate quoting: encoded PowerShell on Windows and shell quoting on POSIX; paths are absolute. After moving the project, inspect the new plan; if `.codex/hooks.json` differs, the installer blocks replacement even with `--force`. Merge or remove that file manually before retrying.
 
-- `config.toml` at any level;
-- user-level `hooks.json`;
-- credentials, API keys, router keys, or caller capability URLs;
-- your existing `PROJECT_STATE.md` or `AGENTS.md`;
-- anything outside those two target directories.
+The director profile is a root config profile and is not installed under `agents/`. `--no-agent` skips only the six child TOMLs. The ledger runtime lives at `<codex-home>/skills/sol-deepseek-project-orchestrator/scripts/orchestrate.py`; it is separate from the `codex` command used to launch model sessions. The official [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference) documents `<CODEX_HOME>/<profile>.config.toml` files and `--profile <profile>` selection.
 
-The installer also never runs the network and never invokes a model.
+The historical package directory name is retained for in-place upgrade compatibility. It does not mean the native workflow depends on DeepSeek. The old `astra_flash_builder` configuration may point to DeepSeek; it is not the new Astra consultant.
 
-## Exit codes
-
-| Code | Meaning |
-| --- | --- |
-| `0` | Success, or a clean dry run. |
-| `2` | Usage or environment problem (missing path, no Codex home). |
-| `3` | Conflicts detected; **nothing was written**. |
-
-Exit code 3 is the important one. If any managed file already exists with
-different content, the installer writes nothing at all and tells you which files
-collided. Re-run with `--force` to replace them (each replaced file is saved
-next to the original as `<name>.bak`), or delete them yourself.
-
-## Re-running
-
-The installer is idempotent. A second run with the same arguments reports
-`created: 0` and `updated: 0`. Nothing is rewritten, so file timestamps and
-generated hook configuration stay stable.
-
-## After installing
-
-1. Restart or reopen Codex so the skill and the custom agent are discovered.
-2. If you installed hooks, review them with `/hooks` and trust the project
-   `.codex` layer. Project-local hooks do not run until trusted.
-3. Confirm the worker route resolves to DeepSeek in your model picker.
-4. Continue with [QUICKSTART.md](QUICKSTART.md).
-
-## Adding hooks later
-
-Hooks are opt-in and additive; enabling them later does not re-plan the rest:
+## Verify
 
 ```bash
-python scripts/install.py --project ~/code/my-project --codex-home ~/.codex --hooks
+python scripts/verify_install.py --project /tmp/demo-project --codex-home /tmp/demo-codex
+python scripts/verify_install.py --project /tmp/demo-project --codex-home /tmp/demo-codex --self-test
 ```
 
-The generated `hooks.json` embeds absolute interpreter and script paths, because
-Codex runs hook commands with the session working directory, which may be a
-subdirectory of the project. If you move or rename the repository, re-run the
-installer with `--hooks --force` to regenerate it. The command form that avoids
-this is documented in `hooks/README.md`.
+`verify_install.py` requires Python 3.11+ because it uses the standard-library `tomllib` parser; under an older Python it reports that no configuration was validated. The installer and runtime ledger do not share this verifier-only requirement. Python 3.12.14 was available in this environment. If installation intentionally used `install.py --no-agent`, verify it with the matching explicit flag, for example `python scripts/verify_install.py --project /tmp/demo-project --codex-home /tmp/demo-codex --no-agent`. This permits absent child-role files, but any existing role files are still verified, whether or not the registry claims ownership. Verification checks installed files, configured role model/effort/tier fields, hook configuration, and local ledger behavior. The tier string's semantic acceptance remains unverified; verification does not prove observed dispatch tier. It also does not authenticate manual role/actor claims. The hook self-test uses a temporary project. These checks do not invoke every configured model or prove that future delegated calls are available. See [ROUTING.md](skill/references/ROUTING.md) for the distinction between configuration validation, module tests, and real inference.
 
-## Verify an installation
+## Initialize a project ledger
+
+After installation, initialize the local backlog separately:
 
 ```bash
-python scripts/verify_install.py --project ~/code/my-project --codex-home ~/.codex
-python scripts/verify_install.py --project ~/code/my-project --codex-home ~/.codex --self-test
+python scripts/orchestrate.py --project /tmp/demo-project init --max-workers 3 --review-round-limit 2 --consultation-limit 1 --escalation-limit 1
+python scripts/orchestrate.py --project /tmp/demo-project snapshot --json
 ```
 
-The verifier checks that every expected file exists, that the hook configuration
-parses and points at real scripts, and that the state file is a sane size. With
-`--self-test` it also runs the installed hooks against a throwaway git
-repository: state injection, silence on a clean tree, and the one-shot nudge.
-
-Exit code `1` means an error; warnings alone do not fail the check.
+The installed copy is also available at `<codex-home>/skills/sol-deepseek-project-orchestrator/scripts/orchestrate.py`. It manages `.codex/ORCHESTRATOR.json`; it does not launch models. Start with [QUICKSTART.md](QUICKSTART.md) for the workflow.
 
 ## Uninstall
 
 ```bash
-python scripts/uninstall.py --project ~/code/my-project --codex-home ~/.codex --dry-run
-python scripts/uninstall.py --project ~/code/my-project --codex-home ~/.codex
+python scripts/uninstall.py --project /tmp/demo-project --codex-home /tmp/demo-codex --dry-run
+python scripts/uninstall.py --project /tmp/demo-project --codex-home /tmp/demo-codex
 ```
 
-The uninstaller removes the installed skill directory, the worker agent file,
-the bundled hook scripts, and a `hooks.json` that carries the generated marker.
-It keeps `PROJECT_STATE.md` and `AGENTS.md`, because those are yours. Add
-`--purge-state` if you really want the state file gone, and a `hooks.json` you
-wrote by hand is always left alone.
+The shared install registry lets uninstall remove only unchanged files that the installer still claims. Project state and root `AGENTS.md` are user-owned and kept. Any file modified after installation is preserved with a warning. Inspect the plan before applying it.
 
-## Running the tests
+## Troubleshooting and safety
 
-```bash
-python -m unittest discover -s tests -v
-```
-
-The suite is non-destructive: temporary directories, a throwaway git repository,
-no network, and no writes anywhere near a real Codex home.
-
-## Troubleshooting
-
-See [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) and [SECURITY.md](SECURITY.md). Review project hooks with `/hooks` and trust the project layer before expecting them to run. The hooks are convenience prompts, not a scheduler or enforcement mechanism.

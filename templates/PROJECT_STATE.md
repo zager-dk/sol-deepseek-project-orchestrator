@@ -45,3 +45,6 @@ _One short paragraph: what this repository or product is trying to achieve._
 
 - **Last semantic update:** _YYYY-MM-DD_
 - **Branch / commit:** _optional_
+- **Snapshot:** `<!-- orchestrator-snapshot:<state_fingerprint> -->` (copy `state_fingerprint` from `python scripts/orchestrate.py snapshot --json` after semantic edits; it excludes state/backlog paths, so a state-only commit does not stale itself. The separate `fingerprint` field is exact HEAD + semantic index + dirty content for review/integration.)
+
+Keep confirmed facts, hypotheses, and plans in separate labeled bullets. Record verification commands with `passed`, `failed`, or `not run`; never present an unrun check as passing. Do not store credentials, secrets, or conversation transcripts.

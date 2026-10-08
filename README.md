@@ -1,155 +1,88 @@
-# Sol + DeepSeek Project Orchestrator
+# Sol + Luna Project Orchestrator
 
-A Codex workflow and skill: keep a strong root model - **GPT-5.6 Sol at high
-reasoning is the preferred choice, and any capable root works if you
-select one** - as a **thin technical lead**, and let one **DeepSeek V4.1 Flash
-worker** do the repository discovery, implementation, testing, and debugging
-behind a single written contract.
+## Optional ledger storage directory
 
-**[Read the full architecture and workflow document ->](ARCHITECTURE.md)**
+By default the runtime keeps its ledger and lock in the project's `.codex` directory. To move only that bookkeeping data, explicitly bind a contained ordinary directory once:
 
-That document is the main explanation of the approach: responsibilities, the
-dispatch sequence, the worker brief, review and correction rules, the persistent
-state lifecycle, the small-task exception, routing and verification limits,
-failure handling, and a worked example. Start there if you want to understand
-the idea rather than install it.
+```powershell
+python scripts/orchestrate.py --project . bind-storage --data-dir .orchestrator-data
+python scripts/orchestrate.py --project . init
+```
 
-Russian summary: [README_RU.md](README_RU.md).
+The binding writes `.codex/ORCHESTRATOR_STORAGE.json` with create-only semantics. It never migrates or adopts an existing ledger. Binding refuses a legacy ledger, a ledger already in the requested directory, paths outside the project, Git metadata, protected `.codex` configuration subdirectories, and links or reparse points. After binding, omit `--data-dir` or pass the same path; a conflicting path or missing/invalid selector fails closed. The selector remains visible to project snapshots. Initialization and binding coordinate through `.codex/ORCHESTRATOR_STORAGE.lock` followed by the legacy lock; normal ledger updates lock only the selected data directory. Keep both generated hook commands consistent with the binding. Installer `--data-dir` embeds the path into both hooks and does not bind storage or create the selected directory.
 
----
+A Codex skill and local workflow for substantial project work. A primary Sol 6.1 director writes the contract, manages a dependency-aware backlog, assigns bounded work to Luna or an escalated Sol senior, and accepts the integrated result with independent review. Astra is reserved for consequential unresolved architecture questions.
 
-## What is in the box
+The existing skill package name `sol-deepseek-project-orchestrator` stays in place for upgrade compatibility. The current mode uses native Codex custom subagents and does not require DeepSeek, an external API router, or a background service.
 
-| Path | What it is |
-| --- | --- |
-| `ARCHITECTURE.md` | The long-form design and workflow document. |
-| `skill/` | The Codex skill: `SKILL.md` plus references. Installs to `<codex-home>/skills/`. |
-| `templates/agents/deepseek-worker.toml` | Custom subagent that routes to DeepSeek V4.1 Flash. |
-| `templates/PROJECT_STATE.md` | The durable state template copied into your project. |
-| `templates/AGENTS.md` | Example project working agreement. |
-| `templates/codex.config.example.toml` | Illustrative, secret-free router configuration. |
-| `templates/hooks.example.json` | Reference shape of the generated project hook config. |
-| `hooks/` | Two stdlib Python hooks: state injection, and a one-shot state nudge. |
-| `scripts/install.py` | Cross-platform installer with a dry-run plan and conflict detection. |
-| `scripts/verify_install.py` | Checks an installed layout and can smoke-test the hooks. |
-| `scripts/uninstall.py` | Removes what the installer added, keeps your content. |
-| `tests/` | Non-destructive tests for all of the above. |
+Start with [QUICKSTART.md](QUICKSTART.md). For the complete workflow and its limits, see [ARCHITECTURE.md](ARCHITECTURE.md). Russian overview: [README_RU.md](README_RU.md).
 
-## Why this shape
+## Roles
 
-One strong model doing everything in one context accumulates logs and traces,
-spends frontier-model tokens on mechanical edits, and then reviews its own work.
-This workflow splits the job:
+| Role | Model / effort | Responsibility |
+| --- | --- | --- |
+| Primary director session (`orchestrator-director` profile) | `gpt-6.1-sol`, high | Plan, assign, integrate, and accept; never implement. |
+| `sol_senior` | `gpt-6.1-sol`, high | Implement after justified escalation. |
+| `luna_worker` | `gpt-6-luna`, medium | Bounded implementation. |
+| `luna_reviewer` | `gpt-6-luna`, high | Independent plan and acceptance review, no fixes. |
+| `sol_reviewer` | `gpt-6.1-sol`, high | Separate read-only review for high-risk work. |
+| `luna_state_editor` | `gpt-6-luna`, low | Narrow state edits under director instruction. |
+| `astra_consultant` | `gpt-6-astra`, high | Rare, decision-changing architecture advice. |
 
-- the root holds scope, contracts, architecture judgement, and acceptance;
-- the worker holds execution inside a bounded contract;
-- `.codex/PROJECT_STATE.md` holds the durable memory, so a fresh chat starts
-  oriented instead of replaying history.
+The primary profile and six child files currently contain `service_tier = "standard"`, but the installed TOML contract does not explicitly confirm that literal. Do not substitute `default` based on API response terminology. Confirm loading and Standard dispatch in an isolated desktop pilot. The model and effort values are template requests, not runtime proof. Per-task effort adaptations are suggestions for supported launch controls, not a runtime guarantee; task reasons should be recorded. Preserve Luna-first routing. These configuration values do not prove runtime dispatch. Delegated inference availability is account-specific; unavailable roles must be reported without silent substitution.
 
-The cost discipline is explicit: one scope pass, one dispatch, one wait, one
-batched review, at most one correction cycle, one final answer.
+## Included
 
-## Install in two minutes
+- `skill/`: entrypoint and focused routing, delegation, and state references.
+- `scripts/orchestrate.py`: standard-library CLI for the project-local backlog ledger and state transitions; it does not launch models.
+- `templates/agents/`: native Codex role definitions.
+- `templates/PROJECT_STATE.md` and `templates/AGENTS.md`: project memory and optional working-agreement templates.
+- `hooks/`: project state injection and freshness nudge hooks.
+- `scripts/install.py`, `scripts/verify_install.py`, `scripts/uninstall.py`: explicit-target installation, verification, and cleanup.
+- `tests/`: isolated non-destructive checks.
+
+## Install and verify in isolation
+
+Use a disposable project and Codex home first. Inspect the plan with `--dry-run`; the installer does not guess a Codex home:
 
 ```bash
-python scripts/install.py --project /path/to/your/repo --codex-home ~/.codex
+python scripts/install.py --project /tmp/demo-project --codex-home /tmp/demo-codex --dry-run
+python scripts/install.py --project /tmp/demo-project --codex-home /tmp/demo-codex --hooks
+python scripts/verify_install.py --project /tmp/demo-project --codex-home /tmp/demo-codex --self-test
 ```
 
-Then add hooks if you want the state file injected automatically:
+On Windows, use separate temporary directories and the same commands with their paths. The installer uses a shared `.orchestrator-install-registry.json`, OS-level locks, and no-clobber behavior for unowned files; failed unlink operations preserve ownership claims. `--force` backs up differing managed files, and `--no-agent` skips only the six child role files; the root director profile remains. Windows hook commands use encoded PowerShell, while POSIX hooks use shell quoting. See [INSTALL.md](INSTALL.md) before installing into a real project.
+
+## First task
+
+Initialize and configure the project-local ledger, then create a task before assigning it:
 
 ```bash
-python scripts/install.py --project /path/to/your/repo --codex-home ~/.codex --hooks
+python scripts/orchestrate.py --project /path/to/repo init --max-workers 3 --review-round-limit 2 --consultation-limit 1 --escalation-limit 1
+python scripts/orchestrate.py --project /path/to/repo add T-101 --goal "Add CSV export" --depends-on "" --priority 50 --risk medium --scope "src/reports/routes.ts,src/reports/Page.tsx" --acceptance "CSV download has headers and rows; unauthenticated request remains 401" --actor director
+python scripts/orchestrate.py --project /path/to/repo list
 ```
 
-Full details, including every flag and exactly what is written where:
-[INSTALL.md](INSTALL.md). First dispatch walkthrough: [QUICKSTART.md](QUICKSTART.md).
+Use `python scripts/orchestrate.py --project /path/to/repo --help` and the [Quickstart](QUICKSTART.md) for dispatch, review, integration, recovery, and completion. The director launches agents through Codex; CLI commands record and validate transitions only.
 
-The installer:
+## Project memory and hooks
 
-- plans every write and prints the plan before it happens;
-- never overwrites a differing file without `--force`, and backs up what it
-  replaces;
-- never overwrites `PROJECT_STATE.md` or `AGENTS.md`, ever;
-- never edits `config.toml`, credentials, or routing;
-- never touches the network.
+`.codex/PROJECT_STATE.md` stores compact project facts, hypotheses, plans, accepted changes, blockers, and verification outcomes. It is not a transcript. Optional hooks inject it on supported session events and can issue a one-time freshness nudge. They do not schedule or launch agents. Read [SECURITY.md](SECURITY.md) before enabling hooks.
 
-## The short version
+## Validation and limits
 
-```text
-Root (Sol class)                 Worker (DeepSeek V4.1 Flash)
-  scope + contract   ---------->  discover, implement, test, fix
-  one batched review <----------  one completion report
-  at most one correction
-  update PROJECT_STATE
-```
-
-The root does not re-explore the repository, does not poll for progress, and
-does not run the worker's whole test suite by reflex. The worker does not spawn
-agents, commit, push, or widen scope.
-
-## Requirements
-
-- Codex with custom subagent support (`.codex/agents/*.toml`).
-- Python 3.9 or newer for the installer, verifier, and hooks. Standard library
-  only; nothing to pip install.
-- A router or provider setup that exposes a DeepSeek V4.1 Flash model id to
-  Codex (for example the Codex Router). Verify the exact slug against your own
-  model picker; the bundled value is a starting point, not a guarantee.
-- Git, for the `Stop` hook's change detection. Everything else works without it.
-
-## Router configuration
-
-`templates/codex.config.example.toml` shows the shape of a routed provider
-block, with placeholders instead of a real caller capability URL. It is
-illustrative. Your router's own README is the authoritative source for
-version-specific steps.
-
-Each user supplies their own DeepSeek API key, or their own credentials for a
-different provider that exposes the DeepSeek route. This repository does not
-provide a shared key or model access.
-
-Two rules that matter more than the syntax:
-
-1. Never commit a real router capability URL, router key, or provider API key.
-2. Never silently substitute another paid model when the DeepSeek route is
-   unavailable. Report the routing problem instead.
-
-## Tests
+Run the suite from the repository root:
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-The suite creates throwaway directories and a throwaway git repository, and it
-never touches a real Codex home or the network.
-
-## Safety
-
-Read [SECURITY.md](SECURITY.md) before installing hooks. In short: hooks run as
-local processes with your permissions, project hooks load only after you trust
-the project `.codex` layer, and hook output is sent to the model, so nothing
-secret belongs in `PROJECT_STATE.md` or in hook output.
-
-## Limits, stated plainly
-
-- This repository ships no model access, no API keys, and no paid setup. It
-  configures a workflow; your router and subscription provide the models.
-- The bundled DeepSeek model slug is router-supplied and may differ in your
-  environment.
-- The installer cannot verify that a worker actually ran on DeepSeek. The root
-  sees a report, not provider billing.
-- Nothing here publishes, pushes, or deploys on your behalf.
+Tests of the CLI validate local state transitions; they do not demonstrate a model call. Report separately the actual live model invocations, test outcomes, and unverified behavior. No cost-saving percentage is claimed without measurement. The package does not install into a live configuration unless the user explicitly runs the installer, and it does not publish, commit, or push.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Changes to the workflow itself should
-update `ARCHITECTURE.md` and `skill/SKILL.md` together, so the explanation and
-the operational instructions cannot drift apart.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Keep the skill and its focused references consistent with [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## License
 
 MIT. See [LICENSE](LICENSE).
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md).

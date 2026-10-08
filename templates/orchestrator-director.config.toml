@@ -1,6 +1,3 @@
-# Example primary-session profile configuration. The canonical installable
-# profile is templates/orchestrator-director.config.toml. See the official
-# Codex config reference for profile files and `--profile` selection.
 # Primary-session config profile. Install at <CODEX_HOME>/orchestrator-director.config.toml.
 # Set CODEX_HOME to that home and run `codex --profile orchestrator-director`
 # from the target project directory.

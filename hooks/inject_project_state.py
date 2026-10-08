@@ -25,7 +25,11 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import re
+import stat
 import sys
+import argparse
 from pathlib import Path
 
 DEFAULT_MAX_BYTES = 12000
@@ -39,11 +43,55 @@ def find_state_file(start: Path) -> Path | None:
         current = start.resolve()
     except OSError:
         return None
+    try:
+        result = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=current,
+                                capture_output=True, text=True, timeout=5, check=False)
+        boundary = Path(result.stdout.strip()).resolve() if result.returncode == 0 else current
+    except (OSError, subprocess.SubprocessError):
+        boundary = current
     for directory in (current, *current.parents):
         candidate = directory / STATE_RELATIVE
-        if candidate.is_file():
+        if safe_codex_dir(directory / '.codex') and not unsafe_link(candidate) and candidate.is_file():
             return candidate
+        if directory == boundary:
+            break
     return None
+
+def safe_codex_dir(path: Path) -> bool:
+    """Do not follow a project state directory through a symlink or junction."""
+    try:
+        info=path.lstat()
+        flag=getattr(stat,'FILE_ATTRIBUTE_REPARSE_POINT',0x400)
+        if stat.S_ISLNK(info.st_mode) or bool(getattr(info,'st_file_attributes',0)&flag) or bool(getattr(path,'is_junction',lambda:False)()): return False
+        return path.is_dir()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+
+def safe_helper(path: Path, root: Path) -> bool:
+    """Require every helper path component to stay inside the Git root."""
+    try:
+        root = root.resolve()
+        relative = path.relative_to(root)
+        current = root
+        for part in relative.parts:
+            current = current / part
+            if unsafe_link(current):
+                return False
+        current.resolve().relative_to(root)
+        return current.is_file()
+    except (OSError, ValueError):
+        return False
+
+
+def unsafe_link(path: Path) -> bool:
+    try:
+        info=path.lstat()
+        flag=getattr(stat,'FILE_ATTRIBUTE_REPARSE_POINT',0x400)
+        return stat.S_ISLNK(info.st_mode) or bool(getattr(info,'st_file_attributes',0)&flag) or bool(getattr(path,'is_junction',lambda:False)())
+    except OSError:
+        return False
 
 
 def read_payload() -> dict:
@@ -66,7 +114,7 @@ def max_bytes() -> int:
     return value if value > 0 else DEFAULT_MAX_BYTES
 
 
-def build_context(state_path: Path, text: str) -> str:
+def build_context(state_path: Path, text: str, data_dir: str | None = None) -> str:
     limit = max_bytes()
     encoded = text.encode("utf-8")
     notes: list[str] = []
@@ -97,10 +145,39 @@ def build_context(state_path: Path, text: str) -> str:
     )
     if notes:
         header += "\nNotes:\n" + "".join(f"- {note}\n" for note in notes)
+    stale = stale_snapshot_note(state_path, data_dir)
+    if stale:
+        header += f"\nFreshness: {stale}\n"
     return f"{header}\n---\n{text}\n---\n(state file: {state_path})\n"
+
+def stale_snapshot_note(state_path: Path, data_dir: str | None = None) -> str | None:
+    """Ask the canonical helper for freshness, avoiding a second hash algorithm."""
+    root=state_path.parent.parent
+    if not safe_codex_dir(root/'.codex'): return 'state path is unsafe; it is not being trusted'
+    root = root.resolve()
+    candidates=(root/'.codex'/'hooks'/'orchestrate.py',root/'scripts'/'orchestrate.py')
+    helper=next((p for p in candidates if safe_helper(p, root)),None)
+    if helper is None: return None
+    try:
+        command=[sys.executable,str(helper),'--project',str(root)]
+        if data_dir: command += ['--data-dir',data_dir]
+        command += ['snapshot','--json']
+        result=subprocess.run(command,cwd=root,capture_output=True,text=True,timeout=5,check=False)
+        data=json.loads(result.stdout) if result.returncode==0 else None
+        state=state_path.read_text(encoding='utf-8',errors='replace')
+        match=re.search(r'<!--\s*orchestrator-snapshot:([0-9a-f]{64})\s*-->',state)
+        if not isinstance(data,dict) or not data.get('state_fingerprint'):
+            return 'snapshot could not be verified; check affected paths before relying on this state'
+        if not match: return 'snapshot marker is missing; check affected paths before relying on this state'
+        if match.group(1)==data['state_fingerprint']: return None
+        paths=data.get('paths',[])
+        return 'snapshot is stale; inspect affected paths first: '+(', '.join(paths[:20]) if paths else 'HEAD changed with no dirty paths')
+    except (OSError,subprocess.SubprocessError,ValueError):
+        return 'snapshot could not be verified; check affected paths before relying on this state'
 
 
 def main() -> int:
+    parser=argparse.ArgumentParser(); parser.add_argument('--data-dir'); args=parser.parse_args()
     if os.environ.get("SOL_DEEPSEEK_DISABLE_STATE_HOOK"):
         return 0
 
@@ -128,7 +205,7 @@ def main() -> int:
     output = {
         "hookSpecificOutput": {
             "hookEventName": event,
-            "additionalContext": build_context(state_path, text),
+            "additionalContext": build_context(state_path, text, args.data_dir),
         }
     }
     try:

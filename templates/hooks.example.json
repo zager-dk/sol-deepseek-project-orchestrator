@@ -1,6 +1,6 @@
 {
-  "_comment": "Reference shape for <repo>/.codex/hooks.json. The installer generates a copy of this with real interpreter and script paths; do not hand-edit the generated file unless you also re-run the installer. JSON keys are camelCase (commandWindows); TOML config.toml accepts command_windows. The SessionStart matcher includes 'compact', which is what covers the window after compaction.",
-  "description": "Project state injection and one-shot state nudge for the Sol + DeepSeek thin-root workflow.",
+  "_comment": "Reference shape only. Installer uses POSIX shell quoting and an encoded PowerShell command on Windows; install creates project-local hooks only with explicit --hooks opt-in.",
+  "description": "Project state injection and one-shot freshness check for the native Codex orchestrator workflow.",
   "hooks": {
     "SessionStart": [
       {
@@ -8,8 +8,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"/absolute/path/to/repo/.codex/hooks/inject_project_state.py\"",
-            "commandWindows": "\"C:\\\\Path\\\\to\\\\python.exe\" \"C:\\\\absolute\\\\path\\\\to\\\\repo\\\\.codex\\\\hooks\\\\inject_project_state.py\"",
+            "command": "python3 '/absolute/path/to/repo/.codex/hooks/inject_project_state.py'",
+            "commandWindows": "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand JgAgACcAQwA6AFwAUABhAHQAaABcAHQAbwBcAHAAeQB0AGgAbwBuAC4AZQB4AGUAJwAgACcAQwA6AFwAcgBlAHAAbwBcAC4AYwBvAGQAZQB4AFwAaABvAG8AawBzAFwAaQBuAGoAZQBjAHQAXwBwAHIAbwBqAGUAYwB0AF8AcwB0AGEAdABlAC4AcAB5ACcAOwAgAGUAeABpAHQAIAAkAEwAQQBTAFQARQBYAEkAVABDAE8ARABFAA==",
             "timeout": 15,
             "statusMessage": "Loading project state",
             "additionalContextLimit": 4000
@@ -22,8 +22,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"/absolute/path/to/repo/.codex/hooks/stop_project_state_check.py\"",
-            "commandWindows": "\"C:\\\\Path\\\\to\\\\python.exe\" \"C:\\\\absolute\\\\path\\\\to\\\\repo\\\\.codex\\\\hooks\\\\stop_project_state_check.py\"",
+            "command": "python3 '/absolute/path/to/repo/.codex/hooks/stop_project_state_check.py'",
+            "commandWindows": "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand JgAgACcAQwA6AFwAUABhAHQAaABcAHQAbwBcAHAAeQB0AGgAbwBuAC4AZQB4AGUAJwAgACcAQwA6AFwAcgBlAHAAbwBcAC4AYwBvAGQAZQB4AFwAaABvAG8AawBzAFwAcwB0AG8AcABfAHAAcgBvAGoAZQBjAHQAXwBzAHQAYQB0AGUAXwBjAGgAZQBjAGsALgBwAHkAJwA7ACAAZQB4AGkAdAAgACQATABBAFMAVABFAFgASQBUAEMATwBEAEUA",
             "timeout": 20,
             "statusMessage": "Checking project state"
           }

@@ -14,14 +14,40 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
+import shlex
 import subprocess
 import sys
 import tempfile
 import uuid
 from pathlib import Path
+from typing import Optional
 
+try:
+    import tomllib
+except ImportError:  # Python < 3.11: never replace a parser with a scanner.
+    tomllib = None
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 SKILL_NAME = "sol-deepseek-project-orchestrator"
-AGENT_FILE_NAME = "deepseek-worker.toml"
+ROLE_AGENTS = {
+    "luna-worker.toml": ("luna_worker", "gpt-6-luna", "medium"),
+    "luna-reviewer.toml": ("luna_reviewer", "gpt-6-luna", "high"),
+    "sol-senior.toml": ("sol_senior", "gpt-6.1-sol", "high"),
+    "sol-reviewer.toml": ("sol_reviewer", "gpt-6.1-sol", "high"),
+    "astra-consultant.toml": ("astra_consultant", "gpt-6-astra", "high"),
+    "luna-state-editor.toml": ("luna_state_editor", "gpt-6-luna", "low"),
+}
+ROOT_PROFILE_NAME = "orchestrator-director.config.toml"
+MANIFEST_NAME = "orchestrator-install-manifest.json"
+ROLE_SANDBOX = {
+    "luna-worker.toml": None,
+    "luna-reviewer.toml": None,
+    "luna-state-editor.toml": None,
+    "sol-senior.toml": None,
+    "sol-reviewer.toml": "read-only",
+    "astra-consultant.toml": None,
+}
 
 EXIT_OK = 0
 EXIT_FAIL = 1
@@ -50,7 +76,32 @@ class Report:
         self.warnings.append(f"{name}: {detail}")
 
 
-def parse_args(argv: list[str] | None) -> argparse.Namespace:
+def read_toml_config(path: Path, label: str, report: Report) -> Optional[dict]:
+    """Parse real TOML strictly; unreadable/invalid configs cannot be accepted."""
+    if tomllib is None:
+        report.check(f"{label} TOML parser", False,
+                     "TOML parser unavailable; rerun verification with Python 3.11+ (stdlib tomllib); no configuration was validated")
+        return None
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        report.check(f"{label} TOML parses", False, f"cannot read/parse {path}: {exc}")
+        return None
+    report.check(f"{label} TOML parses", True, str(path))
+    return data
+
+
+def check_config_contract(data: dict, contract: dict, label: str, report: Report) -> None:
+    for (table, key), expected in contract.items():
+        values = data.get(table, {}) if table else data
+        actual = values.get(key) if isinstance(values, dict) else None
+        matches = (isinstance(values, dict) and key not in values) if expected is None else (
+            type(actual) is type(expected) and actual == expected)
+        report.check(f"{label} {table + '.' if table else ''}{key}", matches,
+                     f"expected configured value {expected if expected is not None else '<unset>'!r}; service_tier is a request and does not prove runtime execution tier")
+
+
+def parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="verify_install.py",
         description="Verify an installed orchestrator layout.",
@@ -67,10 +118,12 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="run the installed hooks against a throwaway git repository",
     )
     parser.add_argument("--json", action="store_true", help="machine-readable output")
+    parser.add_argument("--no-agent", action="store_true",
+                        help="explicitly allow absent child-role files after install --no-agent; existing roles are always verified")
     return parser.parse_args(argv)
 
 
-def check_layout(project: Path, codex_home: Path, report: Report) -> None:
+def check_layout(project: Path, codex_home: Path, report: Report, *, no_agent: bool = False) -> None:
     skill_dir = codex_home / "skills" / SKILL_NAME
     report.check("skill directory", skill_dir.is_dir(), str(skill_dir))
     report.check(
@@ -81,26 +134,82 @@ def check_layout(project: Path, codex_home: Path, report: Report) -> None:
         (skill_dir / "ARCHITECTURE.md").is_file(),
         "the long-form design document ships with the skill",
     )
+    report.check(
+        "skill runtime helper",
+        (skill_dir / "scripts" / "orchestrate.py").is_file(),
+        str(skill_dir / "scripts" / "orchestrate.py"),
+    )
     for reference in ("DELEGATION_CONTRACT.md", "STATE_POLICY.md", "ROUTING.md"):
         path = skill_dir / "references" / reference
         report.check(f"skill reference {reference}", path.is_file(), str(path))
 
-    agent = codex_home / "agents" / AGENT_FILE_NAME
-    if agent.is_file():
-        text = agent.read_text(encoding="utf-8", errors="replace")
-        report.check("agent declares deepseek_worker", 'name = "deepseek_worker"' in text)
-        report.check(
-            "agent declares a model",
-            "model = " in text,
-            "model line is required for explicit routing",
-        )
-        report.warn(
-            "agent model id",
-            "confirm the model slug against your own router catalog; the "
-            "bundled slug is router-supplied and may differ",
-        )
-    else:
-        report.warn("custom agent", f"not installed at {agent}")
+    root_profile = codex_home / ROOT_PROFILE_NAME
+    report.check("director root profile present", root_profile.is_file(), str(root_profile))
+    if root_profile.is_file():
+        profile = read_toml_config(root_profile, "director profile", report)
+        root_contract = {
+            ("", "model"): "gpt-6.1-sol",
+            ("", "model_reasoning_effort"): "high",
+            ("", "service_tier"): "standard",
+            ("agents", "enabled"): True,
+            ("agents", "max_concurrent_threads_per_session"): 4,
+        }
+        if profile is not None:
+            check_config_contract(profile, root_contract, "director profile", report)
+
+    # Ownership manifests say who may remove a file, not whether its installed
+    # configuration needs verification or whether --no-agent was requested.
+    for filename, (role, model, effort) in ROLE_AGENTS.items():
+        agent = codex_home / "agents" / filename
+        try:
+            agent.lstat()
+        except FileNotFoundError:
+            if no_agent:
+                report.warn(f"agent {role} absent", "explicit verifier --no-agent allows missing roles; this role configuration was not verified")
+            else:
+                report.check(f"agent {role} present", False,
+                             f"{agent}; for an intentional install --no-agent, verify with --no-agent too")
+            continue
+        except OSError as exc:
+            report.check(f"agent {role} present", False, f"cannot inspect {agent}: {exc}")
+            continue
+        report.check(f"agent {role} present", True, str(agent))
+        data = read_toml_config(agent, f"agent {role}", report)
+        contract = {
+            ("", "name"): role,
+            ("", "model"): model,
+            ("", "model_reasoning_effort"): effort,
+            ("", "service_tier"): "standard",
+            ("", "sandbox_mode"): ROLE_SANDBOX[filename],
+            ("agents", "enabled"): False,
+        }
+        if data is not None:
+            check_config_contract(data, contract, f"agent {role}", report)
+
+    legacy = codex_home / "agents" / "deepseek-worker.toml"
+    if legacy.is_file():
+        legacy_text = legacy.read_text(encoding="utf-8", errors="replace").lower()
+        if "deepseek" in legacy_text:
+            report.warn(
+                "legacy agent routing",
+                f"{legacy} is an existing legacy definition and still names DeepSeek; it was not changed",
+            )
+    agents_dir = codex_home / "agents"
+    if agents_dir.is_dir():
+        for candidate in sorted(agents_dir.glob("*.toml")):
+            if candidate == legacy or candidate.name in ROLE_AGENTS:
+                continue
+            text = candidate.read_text(encoding="utf-8", errors="replace").lower()
+            if "astra_flash_builder" in text and "deepseek" in text:
+                report.warn(
+                    "legacy Astra alias",
+                    f"{candidate} combines astra_flash_builder with DeepSeek routing; preserved without changes",
+                )
+
+    report.warn(
+        "model execution",
+        "verification checks configured model and effort values only; it does not invoke agents or prove runtime availability",
+    )
 
     state = project / ".codex" / "PROJECT_STATE.md"
     if state.is_file():
@@ -126,21 +235,61 @@ def check_layout(project: Path, codex_home: Path, report: Report) -> None:
             "hooks.json declares SessionStart", "SessionStart" in events
         )
         report.check("hooks.json declares Stop", "Stop" in events)
+        report.check(
+            "hooks runtime helper",
+            (project / ".codex" / "hooks" / "orchestrate.py").is_file(),
+            str(project / ".codex" / "hooks" / "orchestrate.py"),
+        )
         for event, groups in events.items():
             for group in groups if isinstance(groups, list) else []:
                 for handler in group.get("hooks", []):
                     command = handler.get("command")
                     if not isinstance(command, str):
                         continue
-                    script = command.split('"')
-                    candidate = script[1] if len(script) > 1 else command.split()[-1]
+                    candidate, parse_error = hook_script_operand(command, event)
+                    script_exists = bool(candidate) and Path(candidate).is_file()
                     report.check(
                         f"{event} hook script exists",
-                        Path(candidate).is_file(),
-                        candidate,
+                        script_exists,
+                        candidate if candidate else parse_error,
                     )
+                    windows = handler.get("commandWindows")
+                    if windows is not None:
+                        safe = isinstance(windows, str) and windows.startswith(
+                            "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand "
+                        )
+                        report.check(f"{event} Windows hook command is encoded", safe, "expected base64 PowerShell invocation")
     else:
         report.warn("project hooks", f"no {hooks_json}; run install.py --hooks to add them")
+
+
+def hook_script_operand(command: str, event: str) -> tuple[Optional[str], str]:
+    """Parse only installer-shaped Python hook commands; never execute them."""
+    expected_scripts = {
+        "SessionStart": "inject_project_state.py",
+        "Stop": "stop_project_state_check.py",
+    }
+    expected = expected_scripts.get(event)
+    if expected is None:
+        return None, f"unsupported hook event {event!r}"
+    try:
+        argv = shlex.split(command, posix=True)
+    except ValueError as exc:
+        return None, f"invalid quoted command: {exc}"
+    if len(argv) not in (2, 4) or (len(argv) == 4 and argv[2] != "--data-dir"):
+        return None, "unsupported command shape"
+    if len(argv) == 4 and not argv[3]:
+        return None, "empty --data-dir value"
+    executable_name = argv[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
+    executable_stem = executable_name[:-4] if executable_name.endswith(".exe") else executable_name
+    versioned_python = executable_stem == "python3" or (executable_stem.startswith("python3") and executable_stem[7:].replace(".", "").isdigit())
+    if executable_stem not in {"python", "py"} and not versioned_python:
+        return None, "unsupported Python interpreter operand"
+    script = argv[1]
+    script_name = script.replace("\\", "/").rsplit("/", 1)[-1]
+    if script_name != expected:
+        return None, f"expected {expected} as script operand"
+    return script, ""
 
 
 def hook_self_test(project: Path, report: Report) -> None:
@@ -161,6 +310,10 @@ def hook_self_test(project: Path, report: Report) -> None:
         hook_env = {"SOL_DEEPSEEK_NUDGE_DIR": str(sandbox / "nudge-markers")}
         state_dir = sandbox / ".codex"
         state_dir.mkdir(parents=True, exist_ok=True)
+        helper_source = hooks_dir / "orchestrate.py"
+        if helper_source.is_file():
+            (state_dir / "hooks").mkdir(parents=True, exist_ok=True)
+            shutil.copy2(helper_source, state_dir / "hooks" / "orchestrate.py")
         (state_dir / "PROJECT_STATE.md").write_text(
             "# Project State\n\n## Project intent\nverify hook\n",
             encoding="utf-8",
@@ -188,21 +341,6 @@ def hook_self_test(project: Path, report: Report) -> None:
             "stdout must be hook JSON with additionalContext",
         )
 
-        result = _run_hook(
-            stop,
-            json.dumps({"cwd": str(sandbox), "turn_id": f"verify-{uuid.uuid4()}"}),
-            sandbox,
-            env=hook_env,
-        )
-        if result is None:
-            report.check("self-test stop runs", False, "process did not start")
-            return
-        report.check(
-            "self-test stop silent on a clean tree",
-            not (result.stdout or "").strip(),
-            f"stdout={result.stdout!r}",
-        )
-
         if not git_ok:
             report.warn("self-test", "git unavailable; skipped the change-detection check")
             return
@@ -211,8 +349,34 @@ def hook_self_test(project: Path, report: Report) -> None:
         tracked.write_text("v1\n", encoding="utf-8")
         _git(sandbox, ["add", "-A"])
         _git(sandbox, ["-c", "user.email=verify@example.invalid", "-c", "user.name=verify", "commit", "-m", "init"])
+        helper = state_dir / "hooks" / "orchestrate.py"
+        if helper.is_file():
+            snapshot = subprocess.run(
+                [sys.executable, str(helper), "--project", str(sandbox), "snapshot", "--json"],
+                cwd=str(sandbox), capture_output=True, text=True, timeout=60, check=False,
+            )
+            try:
+                fingerprint = json.loads(snapshot.stdout)["state_fingerprint"] if snapshot.returncode == 0 else None
+            except (ValueError, KeyError, TypeError):
+                fingerprint = None
+            if fingerprint:
+                with (state_dir / "PROJECT_STATE.md").open("a", encoding="utf-8") as stream:
+                    stream.write(f"\n<!-- orchestrator-snapshot:{fingerprint} -->\n")
+        result = _run_hook(
+            stop,
+            json.dumps({"cwd": str(sandbox), "turn_id": f"verify-clean-{uuid.uuid4()}"}),
+            sandbox,
+            env=hook_env,
+        )
+        if result is None:
+            report.check("self-test stop runs", False, "process did not start")
+            return
+        report.check(
+            "self-test stop silent on a current snapshot",
+            not (result.stdout or "").strip(),
+            f"stdout={result.stdout!r}",
+        )
         tracked.write_text("v2\n", encoding="utf-8")
-        os.utime(state_dir / "PROJECT_STATE.md", (1, 1))
         result = _run_hook(
             stop,
             json.dumps({"cwd": str(sandbox), "turn_id": f"verify-{uuid.uuid4()}"}),
@@ -255,8 +419,8 @@ def _run_hook(
     script: Path,
     payload: str,
     cwd: Path,
-    env: dict | None = None,
-) -> subprocess.CompletedProcess | None:
+    env: Optional[dict] = None,
+) -> Optional[subprocess.CompletedProcess]:
     merged = os.environ.copy()
     if env:
         merged.update(env)
@@ -280,7 +444,7 @@ def _try_git_init(path: Path) -> bool:
     return result is not None and result.returncode == 0
 
 
-def _git(path: Path, args: list[str]) -> subprocess.CompletedProcess | None:
+def _git(path: Path, args: list[str]) -> Optional[subprocess.CompletedProcess]:
     try:
         return subprocess.run(
             ["git", *args],
@@ -294,7 +458,7 @@ def _git(path: Path, args: list[str]) -> subprocess.CompletedProcess | None:
         return None
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     args = parse_args(argv)
     project = Path(args.project).expanduser()
     if not project.is_dir():
@@ -312,7 +476,7 @@ def main(argv: list[str] | None = None) -> int:
     codex_home = Path(raw).expanduser()
 
     report = Report()
-    check_layout(project, codex_home, report)
+    check_layout(project, codex_home, report, no_agent=args.no_agent)
     if args.self_test:
         hook_self_test(project, report)
 

@@ -1,101 +1,52 @@
-# Worker Brief Example
+# Example backlog task and review plan
 
-A filled brief for a small but realistic bundle, with notes explaining why each
-section is written the way it is. Copy the structure, not the content.
+The primary director creates this contract and an independent reviewer prepares scenarios before the Luna worker starts. Reviewer IDs and fresh-context declarations in the ledger are not authenticated. It is a worked example, not a claim about a particular repository's routes.
 
 ```text
-GOAL
-Add CSV export to the report page, with tests for the new route.
+TASK ID
+RPT-CSV-01
 
-WHY
-Support copies numbers out of the table by hand today. The user-visible outcome
-is a working download that respects the current filter.
+GOAL
+Add a CSV download for the currently selected report.
+
+DEPENDENCIES
+None.
+
+PRIORITY / RISK
+50 / medium.
 
 SCOPE
-- server route that streams the current report as CSV
-- download control on the report page
-- tests for the route: happy path, empty result, unauthenticated request
+- report export route
+- report page download control
+- focused route and UI tests
+- exclusive ownership of the files named by the director
 
-NON-GOALS
-- no new export formats
-- no changes to the report query or its caching
-- no styling work beyond the single control
-- no changes to the public report JSON shape
-
-CONSTRAINTS / CONTRACTS
-- reuse the existing auth middleware; do not add a second auth path
-- the CSV column order must follow the visible table order
-- keep the existing streaming helper pattern used by other downloads in the repo
+CONTRACTS AND CONSTRAINTS
+- reuse existing report query and authentication middleware
+- do not change the public report JSON shape
+- CSV column order follows the visible table
+- no other export format or unrelated styling
 
 ACCEPTANCE CRITERIA
-- GET /reports/:id/export.csv returns 200 with content-type text/csv
-- the body has a header row and one row per record
-- an empty result still returns the header row
-- an unauthenticated request returns 401
-- the download control applies the currently selected filter
+- successful request returns `text/csv` with a header and one row per record
+- empty report still returns the header
+- unauthenticated request remains 401
+- the download uses the current report filter
 
-KNOWN RELEVANT PATHS
-- apps/web/src/reports/routes.ts
-- apps/web/src/reports/ReportPage.tsx
-Both are starting points, not the full surface: check for a shared download
-helper before adding a new one.
+CONTEXT
+The current report table already exposes the filtered rows. The director will provide the relevant component/route paths and existing verification command after checking project state.
 
 VERIFICATION
-- run the test and lint commands for apps/web
-- run the new tests specifically and report their counts
-- diagnose and fix ordinary in-scope failures before reporting
-
-RETURN FORMAT
-- STATUS: ready_for_review | blocked | failed
-- SUMMARY: concise
-- CHANGED: paths + behavior
-- VERIFICATION: command + outcome for each command
-- RISKS/BLOCKERS: only unresolved items
-- ROOT/USER DECISIONS: only if genuinely required
+Run the focused route and UI tests. Report exact commands, exit status, and results. Identify failed and unrun checks separately.
 ```
 
-## Why this brief works
+## Reviewer scenarios prepared before implementation
 
-**One outcome, not a checklist of edits.** The goal is a working download, so
-the worker is free to discover the right place to put the route.
+1. A report with multiple rows produces the expected header, column order, and values.
+2. An empty report returns a header-only CSV.
+3. A request without authentication returns 401.
+4. Changing a filter changes the downloaded rows to match the visible report.
+5. Existing report JSON consumers retain their previous response shape.
+6. CSV fields containing commas, quotes, and newlines are escaped correctly.
 
-**Non-goals are explicit.** Changing the report JSON shape is the most tempting
-adjacent refactor here, and the brief closes that door before it opens.
-
-**Acceptance criteria are observable.** Every line can be checked by looking at
-a response or a test result. None of them say "works well".
-
-**Known paths come with a warning.** The brief points at two files to save time
-and explicitly says they are starting points, which stops the worker from
-treating them as the whole surface.
-
-**Verification names commands, not outcomes.** The worker reports what ran and
-what happened; it does not get to assert that things are fine.
-
-## Anti-patterns
-
-```text
-# Too vague: no worker can satisfy this
-GOAL
-Improve the reporting page.
-
-# Too small: this is a one-line edit the root should do directly
-GOAL
-Rename the variable `reportsData` to `reportRows`.
-
-# Scope creep built in: three unrelated bundles in one dispatch
-GOAL
-Add CSV export, upgrade the router, and fix the login bug.
-
-# Unfalsifiable acceptance
-ACCEPTANCE CRITERIA
-- export is fast
-- the code is clean
-
-# Verification without teeth
-VERIFICATION
-- make sure everything works
-```
-
-Each of these costs at least one extra round trip, and the vague ones often cost
-two: one to discover the ambiguity, one to correct it.
+A fresh independent reviewer then inspects the exact diff, surrounding query/auth code, and observed results. Fresh-context and stopped-owner fields are declarations; they do not establish identity, context isolation, or process control. It returns `pass`, `fail`, or `inconclusive` with evidence and does not edit the implementation. An unrun scenario remains unverified. The director integrates and checks the combined snapshot before closing the task or unlocking a dependent item.

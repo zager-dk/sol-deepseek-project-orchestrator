@@ -1,161 +1,47 @@
 ---
 name: sol-deepseek-project-orchestrator
-description: Use for substantial coding work when a strong root model should stay a thin technical lead and orchestrator while one DeepSeek V4.1 Flash native subagent owns repository discovery, implementation, testing, debugging, and routine verification. Preferred root is GPT-5.6 Sol at high reasoning; another root model works if the user selects one. Keeps a compact durable project state across chats and compaction.
+description: Coordinate substantial project work in native Codex subagents with a Sol 6.1 director, Luna implementation and independent review, and rare Astra consultation. Keeps compact per-project state and a manually managed dependency-aware backlog.
 ---
 
-# Sol + DeepSeek Project Orchestrator
+# Project Orchestrator
 
-Long-form explanation of this workflow, for humans and for other models:
+Use this skill for substantial implementation, multi-component debugging, migrations, or architecture work that benefits from explicit contracts and independent acceptance. The historical package name `sol-deepseek-project-orchestrator` remains for upgrade compatibility; the current native mode does not require DeepSeek or an external router.
 
-- `ARCHITECTURE.md` - installed next to this file, and published in the repository.
-- `references/ROUTING.md` - how the worker role is wired to DeepSeek, and what to do when routing is unavailable.
-- `references/DELEGATION_CONTRACT.md` - the worker brief template.
-- `references/STATE_POLICY.md` - the durable state schema.
+Read only the supporting guide needed for the current step:
 
-Use this workflow for substantial implementation, multi-file features, debugging across components, migrations, or refactors.
+- [Routing](references/ROUTING.md) for model roles, TOML definitions, and availability limits.
+- [Delegation contract](references/DELEGATION_CONTRACT.md) for implementation and review briefs.
+- [State policy](references/STATE_POLICY.md) when initializing, refreshing, or updating `.codex/PROJECT_STATE.md`.
 
-The user is the product and vision supervisor. The root model is the technical lead and orchestrator. DeepSeek is the implementation worker.
 
-## Core topology
+## Director rules
 
-Root -> one DeepSeek V4.1 Flash worker -> root acceptance review.
+The director is `orchestrator_director` (`gpt-6.1-sol`, high). It owns scope, interfaces, task boundaries, dependencies, acceptance, integration, and decisions. It never implements code, including small changes. If native delegation is unavailable, state that blocker and stop implementation rather than breaking the role boundary.
 
-**Preferred root: GPT-5.6 Sol at high reasoning.** This is the intended shape of
-the workflow: the expensive model spends its effort on scope, contracts,
-judgement, and acceptance, while mechanical execution goes to the worker. If the
-user selects a different root model, apply the same rules under that model; the
-user's choice wins and no re-planning is needed.
+Before planning, check the state marker against the separate `state_fingerprint` from the project snapshot. The task fingerprint binds exact HEAD commit, semantic index entries, and dirty content; state freshness excludes state/backlog bookkeeping, so a state-only commit does not stale itself while a source commit does. Inspect affected paths when stale. After a semantic state update, write the current `state_fingerprint` marker into the state file. It writes a backlog contract before dispatch: ID, goal, dependencies, priority, risk, change area, acceptance criteria, owner, and status. Do not assign blocked items or give one item to multiple agents.
 
-The worker side is not a preference. The implementation worker is DeepSeek V4.1
-Flash, reached through an explicitly configured route.
+Choose concurrent assignments based on independent ready tasks, shared resources, and review capacity. The ledger reservation cap and Codex spawned-agent thread cap are separate ceilings, neither a target. Integrated tasks awaiting completion retain a ledger reservation. Serialize ownership where tasks share files, API shapes, schemas, migrations, or a test environment. The first version uses director-managed assignment and local ledger transitions; it is not a daemon or model launcher.
 
-Use a native custom subagent whose `model` is an explicitly configured DeepSeek route, for example the `deepseek_worker` agent shipped in this repository (`templates/agents/deepseek-worker.toml`). Pass the route explicitly when you dispatch. Historical installations may still carry the legacy role name `astra_flash_builder`; treat that name as an alias for the same worker job, not as a different role.
+## Implementation and acceptance
 
-Never silently substitute another paid model when the DeepSeek route is unavailable. Report the routing problem instead of falling back.
+Use `luna_worker` (`gpt-6-luna`, medium) for bounded work; request high for nontrivial logic or low only for exact mechanical edits when supported, and record why. Use `sol_senior` (`gpt-6.1-sol`, high) only after justified escalation; request xhigh for a complex reproducible bug only through supported launch controls and record why. The primary Sol director defaults to high; it may request xhigh for a complex initial plan, architecture, or contradictions only when supported. The Luna reviewer defaults to high; Sol reviewer defaults to high and may request xhigh for concurrency, data-loss risk, or complex interactions. State editor defaults to low and may request medium to reconcile reports. Astra defaults to high and may request xhigh only for an especially complex architecture choice. Effort changes are instructions for launch controls, not a runtime capability guarantee. This policy preserves Luna-first routing.
 
-## Thin-root rule
+Escalate justified complex implementation to `sol_senior` (`gpt-6.1-sol`, high), supplying the current diff, reproduction, acceptance contract, and prior attempts. Do not silently substitute a different model if a role is unavailable.
 
-For a substantial task, the root should normally perform exactly:
+For significant tasks, ask a separate `luna_reviewer` (`gpt-6-luna`, high) to derive scenarios from the original contract before implementation, then inspect the diff, surrounding code, and observed behavior. It returns `pass`, `fail`, or `inconclusive` with evidence and does not edit the reviewed code. It identifies failed and unrun checks. The director settles unclear requirements and review disputes. For security, access, migrations, concurrency, or similarly high risk, add independent Sol review or use `astra_consultant` (`gpt-6-astra`, high) for a decision-changing question; Luna approval alone does not close those risks.
 
-1. One scope and contract pass.
-2. One coherent worker dispatch.
-3. One wait for completion; do not poll or request progress updates.
-4. One batched acceptance review.
-5. At most one batched correction dispatch when needed.
-6. One final response to the user.
+Set a finite review-round limit that allows the initial review and at most one Luna correction review by default. After those rounds are exhausted, diagnose the cause and change approach. The ledger permits a bounded Sol senior escalation (one by default), carrying the diff, reproduction, and prior attempts, with one added review round. Further work requires a separate director-created task. A reviewer `inconclusive` result blocks the task. The director may replan with a resolution and explicit goal, scope, or acceptance updates; the ledger records contract changes and rechecks scope conflicts on assignment. Prefer a follow-up task for substantially different work. Bound consultations and review cycles. Do not let agents spawn nested work without explicit director assignment.
 
-Do not duplicate the worker's repository discovery, implementation loop, or full validation unless there is concrete evidence that the worker missed something important.
+Only the integrated, independently checked snapshot can complete a task or unlock its dependents. Keep one active writer per shared file. On interruption, preserve edits, inspect the current diff, confirm the earlier worker stopped, then safely resume or reassign.
 
-## Before delegation
+For a persistent bug or design uncertainty, the director may ask two agents to investigate different hypotheses independently. State the question, budget, constraints, and stop condition. Favor evidence and discriminating checks over duplicate full implementations. Consult Astra only if advice can change the decision.
 
-Read `.codex/PROJECT_STATE.md` if it was not already injected by the session hook.
+## State updates
 
-Inspect only enough repository context to establish:
+`.codex/PROJECT_STATE.md` is compact project memory, not conversation history. Distinguish confirmed facts, hypotheses, and plans; record accepted changes and verification outcomes, including failed and unrun checks. Never store secrets or full logs. Ask `luna_state_editor` (`gpt-6-luna`, low) to make a narrow update from director instructions, then review the diff yourself.
 
-- goal and user-visible outcome;
-- scope and non-goals;
-- interfaces and contracts that must remain stable;
-- acceptance criteria;
-- high-risk constraints;
-- relevant paths if already known.
+The state hooks run at supported session events and may issue one Stop nudge. They do not schedule agents. The project-local `.codex/ORCHESTRATOR.json` ledger records backlog transitions. See [state policy](references/STATE_POLICY.md) for freshness and scope.
 
-Do not read the whole repository merely to prepare the brief. Let the worker own in-scope discovery.
+## Cost and completion
 
-## Worker brief
-
-Delegate one coherent implementation bundle, not a sequence of tiny steps. See `references/DELEGATION_CONTRACT.md` for the template. Include:
-
-- GOAL
-- WHY / user intent when relevant
-- SCOPE and NON-GOALS
-- CONSTRAINTS and contracts
-- ACCEPTANCE CRITERIA
-- KNOWN RELEVANT PATHS only when useful
-- VERIFICATION expectations
-- RETURN FORMAT
-
-Tell the worker to investigate the relevant repository area itself, implement, test, diagnose failures, iterate within scope, and return one concise completion report rather than play-by-play updates.
-
-The worker should return:
-
-- STATUS: ready_for_review | blocked | failed
-- concise summary
-- changed paths
-- verification commands and outcomes
-- unresolved risks and blockers
-- decisions that genuinely require the root or the user
-
-## Acceptance review
-
-Review the finished diff and evidence in one batch.
-
-Check two lenses together:
-
-1. specification and acceptance compliance;
-2. quality, regressions, security, architecture, and maintainability proportional to the task.
-
-Do not automatically rerun the worker's entire validation suite. Rerun a focused check only when evidence is missing, suspicious, or high-risk.
-
-If fixes are needed, send all concrete findings in one correction request. Default to one correction cycle. If the same problem remains after a focused correction, diagnose at the root and escalate only when necessary.
-
-## Durable project memory
-
-`.codex/PROJECT_STATE.md` is the canonical durable working memory for the project. It is state, not history.
-
-The root owns this file. The worker must not rewrite it unless the brief explicitly delegates a narrow state update.
-
-Before finishing a turn, update PROJECT_STATE when the accepted work or discussion materially changes any of:
-
-- current milestone or feature status;
-- architecture, public contracts, data model, or major dependencies;
-- durable product and UX decisions;
-- important constraints or non-goals;
-- known blockers, significant bugs, or technical risks;
-- verification baseline;
-- next concrete steps.
-
-Do not record:
-
-- routine command output;
-- transient debugging hypotheses;
-- failed attempts that no longer matter;
-- verbose change logs;
-- conversation history;
-- worker play-by-play.
-
-Edit existing bullets and delete stale state instead of appending a chronological diary. Keep the file compact; target under 10 KB and no more than roughly 200 lines.
-
-The optional project hooks in `hooks/` inject PROJECT_STATE on session start, resume, clear, and after compaction. That is one `SessionStart` hook whose matcher includes the `compact` source, which is the supported way to reach the model after compaction. A Stop hook acts as a safety net: if repository changes occurred during the turn and PROJECT_STATE was not updated, it requests one final state-update pass before the turn ends.
-
-See `references/STATE_POLICY.md` for the exact memory schema.
-
-## User escalation policy
-
-The user should supervise direction, not agent logistics.
-
-Ask the user only when:
-
-- a subjective product or UX choice materially changes the result;
-- requirements conflict in a way that cannot be resolved from repository evidence;
-- an irreversible or destructive operation is required;
-- credentials, spending, external publication, production deployment, or secrets require approval;
-- there are materially different architecture options with product consequences;
-- one focused worker correction still leaves a genuine blocker.
-
-Otherwise make the reasonable technical decision and continue.
-
-## Small tasks
-
-For trivial, clearly local work, the root may do the change itself instead of delegating. Do not summon a worker for formatting, a tiny text change, a simple configuration edit, or a one-line obvious fix.
-
-The orchestration overhead only pays off when a task is large enough that repository discovery, implementation, and verification are genuinely worth delegating.
-
-## Context discipline
-
-Prefer repository state over chat history. The repository is durable memory; the chat is temporary working memory.
-
-After a logical milestone, keep PROJECT_STATE current and consider starting a fresh chat rather than carrying obsolete debugging history indefinitely. Automatic compaction is useful, but it is not a substitute for clean durable project state.
-
-## Verification limits
-
-The root should not treat orchestration as verification. A worker report is evidence, not proof: it is a claim about commands that ran and outcomes that were observed. Accept work on evidence you can inspect, and keep any claim you cannot check out of the durable state.
+The role templates currently contain `service_tier = "standard"`; treat this as an unverified candidate config value. Do not infer that API response `default` is the equivalent TOML selector. Confirm the config and Standard dispatch in an isolated desktop pilot. If Standard is unavailable or unconfirmed, report the blocker; do not auto-select Fast or Ultrafast. Do not auto-select maximum reasoning. Pass only relevant context, combine small related work where it reduces handoffs, and avoid routine progress polling. The final report separates actual live model calls, tests run, and behavior that remains unverified. Do not claim percentage savings without measurements.

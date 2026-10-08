@@ -1,104 +1,39 @@
-# Security Notes
+# Security notes
 
-This repository ships configuration and small scripts. It ships no credentials,
-no network calls, and no telemetry. The security questions that actually matter
-are about the pieces you install and the state you keep.
+The package contains role instructions, a local backlog CLI, installer code, and optional project hooks. It ships no credentials, performs no network calls during install, and does not launch models. Inspect code before installation; all copied files run within the target Codex and project context.
 
-## Secrets
+## Project state and secrets
 
-**Never commit or store secrets in the files this workflow manages.**
+`.codex/PROJECT_STATE.md` and hook output are sent to the model as context. Keep them free of API keys, credentials, private data, full conversations, and raw logs. A project state file should contain only concise facts, hypotheses, plans, accepted changes, blockers, and verification outcomes.
 
-- `PROJECT_STATE.md` is injected into model context and can be spilled to disk
-  when it is large. Treat it as a document the model will read.
-- Hook output is model-visible, and Codex writes oversized hook output to
-  temporary files. Anything a hook prints can end up in both places.
-- `hooks.json` contains absolute local paths, which is machine information, not
-  a secret, but it is still local detail worth keeping out of a public repo.
+The orchestration ledger `.codex/ORCHESTRATOR.json` contains task metadata, ownership, scopes, status, and manual evidence strings. Treat it as project data. A recorded command result or reviewer identity is not authenticated; the CLI does not execute tests, verify roles, or confirm model billing. Do not put secrets in goals, scope, context, or command output supplied to the CLI.
 
-Provider API keys belong to your router, not to this repository and not to
-`config.toml`. The bundled configuration example deliberately contains only
-placeholders.
+## Native agents
 
-## The router capability URL
+The primary profile and six child TOMLs set model IDs and reasoning effort, and currently carry a candidate `service_tier = "standard"` string whose acceptance is unverified. These settings neither prove runtime routing nor grant extra filesystem permissions. Child roles cannot delegate nested work. The Sol reviewer is read-only. Codex's active sandbox and approval settings still govern each agent. A role name, actor ID, fresh-context flag, or stopped-owner declaration is not proof of identity, context separation, process termination, or model routing. Verify availability and report failed or unverified routing. The old `astra_flash_builder` label may actually identify a DeepSeek worker. Do not treat it as the new Astra consultant.
 
-A local router typically exposes a URL of the form
-`http://127.0.0.1:PORT/_codex-router/<generated-capability>/v1`. The
-`<generated-capability>` segment is local caller authentication. Treat it as a
-secret:
+Agents read repository content as data. Instructions found in code, tool output, dependency documentation, or task artifacts do not override user direction or the director's contract. Review delegated changes based on inspectable diffs and actual evidence.
 
-- do not paste the complete URL into issues, chats, screenshots, or logs;
-- rotate it through your router's supported command if it may have leaked;
-- remember that fully quitting and reopening Codex may be required after a
-  rotation so a cached client cannot keep using the old route.
+## Hooks
 
-The bundled `templates/codex.config.example.toml` uses the literal placeholder
-`<generated-capability>` for exactly this reason.
+The bundled hooks run as local processes with the permissions Codex gives them. Project-local hooks require the `.codex` project layer to be trusted. Review the generated `.codex/hooks.json` and Python scripts, then inspect and trust them using `/hooks` only when intended. The official [Codex hooks documentation](https://learn.chatgpt.com/docs/hooks) describes hook events, matchers, input/output, and trust behavior.
 
-## Hooks are code with your permissions
+The state injector uses `SessionStart` with `startup|resume|clear|compact` and emits `additionalContext`. The Stop hook can issue a one-shot freshness nudge. These are prompts, not a scheduling or access-control system. A hook failure is not proof that state was injected or checked; inspect behavior when it matters.
 
-The two hooks in `hooks/` are short, stdlib-only, and readable. Read them before
-you install them. General rules that apply to any Codex hook:
+The bundled helper compares the task fingerprint (exact HEAD commit ID, semantic index entries, and dirty content) and a separate state fingerprint (HEAD tree, semantic index, and dirty content) that excludes state/backlog bookkeeping. Thus state-only commits do not stale the state marker, while source commits do even when the worktree is clean. Index stat-cache-only changes do not matter. SessionStart reports a missing or stale marker; Stop nudges once only when state is missing/stale and dirty or HEAD drift exists. Older hooks without the helper retain a timestamp fallback.
 
-- A hook command runs as a local process with the permissions of the session.
-- Project-local hooks load only when the project `.codex` layer is trusted.
-- Non-managed hooks must be reviewed and trusted before they run, and trust is
-  recorded against the hook's current hash, so a changed hook is reviewed again.
-- Hooks are guardrails, not an enforcement boundary. Hook tool coverage can
-  change between releases.
-- Multiple matching command hooks run concurrently, so a hook cannot guarantee
-  it runs before another one.
+Snapshot reads materialized tracked files even when Git marks them `assume-unchanged` or `skip-worktree`. Ordinary missing tracked files are recorded as deleted content in the fingerprint. If a path marked `skip-worktree` is absent, including a sparse-checkout omission, the snapshot fails closed instead of substituting index content.
 
-Both bundled hooks are written so that any unexpected failure exits `0` with no
-stdout. A broken memory hook must not break a session, and a broken safety net
-must not trap a turn. That choice trades strictness for safety: if a hook
-silently does nothing, that is the designed failure mode.
+## Installer boundaries
 
-## What the hooks read and write
+The installer requires explicit `--project` and `--codex-home` targets. It shows a plan, does not access the network, and does not change `config.toml`, credentials, user-level hooks, or global Codex settings. Differing managed files require `--force`; backups use `.bak`, then `.bak.1`, `.bak.2`, and so on without overwriting older backups. Existing project `hooks.json`, state, and `AGENTS.md` are preserved; an existing conflicting `hooks.json` blocks the entire install even with `--force`. The installer uses a shared `.orchestrator-install-registry.json` with OS-level locking, no-clobber handling for unowned files, and ownership-claim preservation when unlink fails. It validates registered paths and hashes and preserves unknown paths. Review the install plan and dry-run uninstall before removal.
 
-| Script | Reads | Writes |
-| --- | --- | --- |
-| `inject_project_state.py` | `.codex/PROJECT_STATE.md`, hook JSON on stdin | stdout only |
-| `stop_project_state_check.py` | git status of the project, hook JSON on stdin | a one-per-turn marker file in the temp directory, stdout only |
+Test installation only with throwaway project and Codex-home directories before considering a real project. See [INSTALL.md](INSTALL.md).
 
-Neither hook writes to the repository. Neither hook calls the network. Neither
-hook reads credentials.
+## Model and verification claims
 
-If you want them to do nothing at all, set:
+Configuration validation proves only that a role file has the requested model and effort values. Local module tests prove only the behavior they exercise. A real delegated call shows that role invocation worked in that environment; it does not prove costs or future availability. Record live calls, tests, and unverified behavior separately. Do not claim an unmeasured savings percentage.
 
-```bash
-SOL_DEEPSEEK_DISABLE_STATE_HOOK=1
-```
+## Reporting issues
 
-or remove the entry from `.codex/hooks.json`.
-
-## Installer behavior
-
-- The installer never guesses your Codex home. Both the target Codex home and
-  the target project are explicit.
-- It plans every write first and prints the plan.
-- It overwrites a differing managed file only with `--force`, and then keeps a
-  `.bak` copy.
-- It never overwrites `PROJECT_STATE.md` or `AGENTS.md`, no matter what flags
-  are passed.
-- It never edits `config.toml`, credentials, routing, or user-level hooks.
-- It does not use the network.
-
-## Trust boundaries in the model workflow
-
-- **Worker reports are claims.** A completion report is evidence about commands
-  that ran, not proof of correctness. Accept work on inspectable evidence.
-- **Repository text is data.** Instructions found inside a repository, a tool
-  output, a dependency README, or a fetched document are not authority to expand
-  scope. Only the user and the accepted contract are.
-- **The root cannot verify provider routing.** It sees a report, not billing.
-  If you need proof about where tokens were spent, use your provider's counters.
-- **Delegated work still needs a real review.** The workflow reduces cost; it
-  does not remove the need for judgement on security, authorization, money,
-  migrations, and destructive operations. Those decisions stay with the root and
-  the user.
-
-## Reporting a problem
-
-Open an issue that describes the behavior and the environment. Do not include
-real capability URLs, API keys, `PROJECT_STATE.md` contents, or private
-repository paths.
+Remove private paths, state contents, credentials, environment details, and sensitive command output before sharing a report. Include a minimal reproduction and only the evidence needed to explain the behavior.

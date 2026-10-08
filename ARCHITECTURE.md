@@ -1,400 +1,73 @@
-# Architecture: The Thin-Root Orchestration Workflow
-
-This document describes the whole working model in one place: who does what, in
-what order, and where the model is allowed to spend effort. It is written to be
-read by two audiences at once:
-
-- a person deciding whether this workflow fits their project;
-- a language model that has just been handed the repository and needs the rules
-  without reconstructing them from chat history.
-
-If you only read one section, read [Responsibilities](#responsibilities) and
-[The dispatch sequence](#the-dispatch-sequence).
-
----
-
-## The problem this solves
-
-A single strong model doing everything in one context has three costs:
-
-1. **Context pressure.** Exploration notes, test logs, stack traces, and file
-   dumps accumulate. Long sessions degrade, and compaction throws away detail
-   that later turns needed.
-2. **Cost per unit of work.** A frontier model writing boilerplate and re-running
-   a test suite burns expensive tokens on mechanical work.
-3. **Verification weakness.** A model that wrote the code and then reviewed its
-   own work tends to confirm its own assumptions.
-
-The thin-root workflow addresses all three by splitting one job into two roles
-and making the boundary between them explicit.
-
-## The shape of it
-
-```text
-user (direction, product judgement, approvals)
-        |
-        v
-ROOT MODEL  (preferred: GPT-5.6 Sol at high reasoning)
-            technical lead, orchestrator, integrator
-        |            one scope pass -> one dispatch -> one wait
-        |            -> one batched review -> at most one correction
-        v
-WORKER MODEL (DeepSeek V4.1 Flash: implementation, tests, debugging)
-        |
-        v
-repository:  code  +  .codex/PROJECT_STATE.md  (durable memory)
-```
-
-Two roles, one repository, one durable state file. The chat is temporary; the
-repository is not.
-
-## Responsibilities
-
-### The user
-
-- Owns the product vision, priorities, and taste.
-- Approves anything irreversible, external, or expensive.
-- Does **not** manage agent logistics. Which agent runs which step, how many
-  correction cycles happened, and what the verification command was are the
-  root's job to handle.
-
-### The root model
-
-**Preferred root: GPT-5.6 Sol at high reasoning.** That pairing is the intended
-shape of this workflow, and it is what the bundled skill assumes when it talks
-about a thin root: a strong, expensive model doing scope, contracts, judgement,
-and acceptance, and nothing mechanical.
-
-The preference is a default, not a lock. If you select a different root model,
-the workflow still applies, because the boundary is defined by responsibilities
-rather than by a model name. What does not change is the worker side: the
-implementation worker is DeepSeek V4.1 Flash, dispatched through an explicit
-route. If routing to that worker is unavailable, report it instead of silently
-substituting another paid model.
-
-The root is a technical lead who delegates the build and keeps the review. In
-one substantial task the root normally does exactly this:
-
-1. **Scope and contract pass.** Read the existing durable state, inspect only
-   enough of the repository to fix the goal, scope, non-goals, stable
-   interfaces, acceptance criteria, and high-risk constraints. Deliberately do
-   not read the whole tree.
-2. **One coherent dispatch.** Write a single worker brief covering the whole
-   bundle, including the verification the worker must run.
-3. **One wait.** Wait for the completion report. No polling, no progress
-   requests, no interrupting a healthy run.
-4. **One batched acceptance review.** Judge the finished diff and the evidence,
-   under two lenses at once: specification compliance, and quality (security,
-   regressions, architecture, maintainability) proportional to the change.
-5. **At most one batched correction.** If the review found problems, send every
-   concrete finding in a single request. Do not drip-feed.
-6. **One final response**, plus the durable state update.
-
-The root keeps architecture decisions, security judgement, public contracts,
-and integration. It does not rewrite the worker's code line by line unless the
-review demands it.
-
-### The worker model
-
-- Owns repository discovery inside the assigned scope.
-- Implements the bundle end to end, writes or updates tests, runs the named
-  checks, diagnoses failures, and iterates inside scope before reporting.
-- Reports once: status, summary, changed paths, verification commands with real
-  exit status, unresolved risks, and decisions that genuinely need the root.
-- Does not spawn nested agents, commit, push, deploy, or widen scope.
-- Reports a missing contract as a blocker instead of inventing one.
-
-The worker is not a smaller version of the root. It is a different job: bounded
-execution against a contract that someone else already established.
-
-## The dispatch sequence
-
-```text
-scope pass
-   |
-   +--> dispatch (one brief, one bundle, one wait)
-           |
-           +--> worker: discover -> implement -> test -> fix -> report
-                   |
-                   +--> review (one batch, two lenses)
-                           |
-                           +--> accept  -> update PROJECT_STATE -> final answer
-                           |
-                           +--> correct (one batch of findings)
-                                   |
-                                   +--> re-review the delta only
-                                           |
-                                           +--> accept, or escalate the
-                                                genuine blocker to the user
-```
-
-The counters matter. Six steps, not one per file. One correction cycle, not an
-unbounded repair loop. If the same problem survives one focused correction, the
-faithful move is to diagnose at the root and escalate, not to keep re-dispatching
-the same failing approach.
-
-## The worker brief
-
-The brief is the contract. It is the single most important artifact in the
-workflow, because it is the only thing the worker is accountable to. A brief
-that is vague produces work the root then has to redo.
-
-```text
-GOAL
-    one outcome, stated as something observable
-
-WHY
-    user or product intent, when it changes what "good" means
-
-SCOPE
-    the work that is inside this bundle
-
-NON-GOALS
-    adjacent work that must not be touched
-
-CONSTRAINTS / CONTRACTS
-    interfaces, shapes, invariants, and safety rules that must survive
-
-ACCEPTANCE CRITERIA
-    how the root will decide the bundle is done
-
-KNOWN RELEVANT PATHS
-    only when it saves the worker real time
-
-VERIFICATION
-    the commands to run, and the instruction to fix ordinary failures first
-
-RETURN FORMAT
-    STATUS / SUMMARY / CHANGED / VERIFICATION / RISKS / DECISIONS
-```
-
-Three rules for writing it:
-
-- **One bundle.** A bundle is a coherent unit of work: a feature, a migration, a
-  cross-component bug fix, a refactor. Not "add the type", "then add the test",
-  "then run it".
-- **Acceptance criteria are checkable.** "Works well" is not a criterion.
-  "Unauthenticated requests still return 401" is.
-- **Non-goals are explicit.** Most scope creep is not malice; it is a worker
-  solving an adjacent problem nobody asked about.
-
-See `skill/references/DELEGATION_CONTRACT.md` for the copy-paste template and a
-filled example.
-
-## Review and correction rules
-
-**One batch, two lenses.** Review the diff once and answer both questions
-simultaneously:
-
-1. *Did it meet the contract?* Every acceptance criterion, checked against
-   evidence rather than against confidence.
-2. *Is it good work?* Correctness, regressions, security, architecture,
-   maintainability, proportional to the blast radius. A one-file change needs a
-   proportional look, not an audit.
-
-**Do not rerun the whole suite by reflex.** Rerun a focused check when the
-evidence is missing, the result is suspicious, or the change is high-risk
-(auth, money, migrations, shared infrastructure, secrets, destructive
-operations). Otherwise accept the worker's reported commands, and spend the
-root's attention on judgement.
-
-**One correction request.** Collect every finding, then send them together with
-the same return format. A second round of tiny corrections is usually a symptom
-of a bad first brief or a bad first review.
-
-**A green exit code is not acceptance.** Zero means a command finished. Look at
-what it proved. "Tests pass" on a suite that never touched the changed path is
-not evidence.
-
-## Persistent project state
-
-`.codex/PROJECT_STATE.md` is the durable working memory. It is **state, not
-history**.
-
-### Lifecycle
-
-1. The installer writes the template once and never overwrites an existing file.
-2. The `SessionStart` hook injects it on startup, resume, clear, and after
-   compaction, so a new chat begins already oriented.
-3. The root updates it before ending a turn, when accepted work changed
-   something durable.
-4. The `Stop` hook is a safety net: if git reports repository changes and the
-   state file is older than the changes, it asks for one extra state pass. It
-   fires at most once per turn and never writes anything itself.
-
-### What belongs in it
-
-- project intent, in one paragraph;
-- the current milestone and its status;
-- durable architecture facts and public contracts;
-- decisions and non-goals, with a short reason when the reason prevents a
-  future reversal;
-- active work not yet integrated;
-- known risks that still matter;
-- the verification baseline (the commands that define "healthy");
-- the next few concrete steps;
-- a short metadata line.
-
-### What does not
-
-- command output, logs, stack traces, or diffs;
-- transient debugging hypotheses;
-- failed attempts that no longer matter;
-- a chronological diary of what happened;
-- worker play-by-play.
-
-Update in place. Delete stale bullets. Keep it under about 10 KB; the hook warns
-past 14 KB. If the file grows into a journal, it stops being memory and becomes
-another context problem.
-
-The root owns the file. A worker may touch it only when the brief says so
-explicitly.
-
-## Small-task exception
-
-Orchestration is overhead, and overhead has a floor. For trivial, clearly local
-work the root should just do it:
-
-- formatting and lint fixes;
-- a one-line obvious bug fix;
-- a small text or copy change;
-- a simple configuration edit;
-- a question about code that needs no changes.
-
-The test is not "how many tokens would this save" but "would repository
-discovery, a brief, and a review cycle cost more than the change itself".
-
-- If the answer is **yes, the overhead would exceed the change**: edit the file
-  directly. Dispatching would cost more attention than the work is worth.
-- If the answer is **no, the work merits delegation**: write the brief and
-  dispatch one coherent bundle.
-
-This exception is deliberate: a workflow that demands ceremony for a typo fix
-gets abandoned before it helps with anything real.
-
-## Routing and verification limits
-
-Be honest about what this design can and cannot guarantee.
-
-- **Routing is configuration, not magic.** The worker exists because a custom
-  Codex subagent resolves to a DeepSeek route. If that route is missing or
-  misconfigured, the correct action is to report the problem, not to substitute
-  another paid model silently.
-- **Model identifiers are environment-specific.** Slugs such as
-  `deepseek/deepseek-v4.1-flash` come from a router catalog. Confirm the exact
-  slug against your own picker before relying on it.
-- **The root cannot see provider billing.** It sees a completion report, not
-  which upstream provider served the tokens. Cost measurements come from the
-  provider's own counters.
-- **A report is a claim.** "Verification: `npm test` exit 0, 41 passed" is
-  evidence of a command, not proof of correctness. Accept on inspectable
-  evidence.
-- **Hooks are guardrails, not enforcement.** Hook coverage can change between
-  releases, project hooks load only after the project `.codex` layer is trusted,
-  and a hook is running as a normal local process with your permissions.
-
-See `skill/references/ROUTING.md` for the routing decision tree.
-
-## Failure handling
-
-| Failure | Response |
-| --- | --- |
-| Worker route unavailable | Report it. Do not silently fall back to another paid model. Ask the user whether to proceed with the root doing the work directly, or fix the route and dispatch once. |
-| Worker returns `blocked` | Read the blocker. If it is a missing contract, answer it and re-dispatch once with the missing piece supplied. If it is a genuine external blocker, tell the user. |
-| Worker returns `failed` | Treat as new information, not as a prompt to retry the same thing. Diagnose, then either re-dispatch with a corrected brief or take the work over. |
-| Review finds problems | One batched correction request. After one focused correction, if the same problem remains, fix it at the root or escalate. |
-| Acceptance criteria turn out to be wrong | Stop and re-scope with the user. Do not silently redefine done to match what was built. |
-| State file is stale or bloated | Rewrite it in place. A bloated state file is a bug in the workflow, not a fact about the project. |
-| Hooks misbehave | Set `SOL_DEEPSEEK_DISABLE_STATE_HOOK=1`, or remove the entry from `.codex/hooks.json`. Hooks must never be able to trap a turn. |
-| Repeated failure of the same approach | Stop. Report the evidence and the blocker. Trying the same thing again with more optimism is not a strategy. |
-
-## Worked example
-
-A concrete pass through the whole workflow, with a small feature.
-
-**User request:** "Add CSV export to the report page."
-
-**1. Scope pass (root).** Read `PROJECT_STATE.md`: the project is an internal
-reporting tool, the current milestone is "support team self-service", and the
-verification baseline is `npm test` plus `npm run lint` in `apps/web`. Inspect
-two files to find the report route and page component. Establish the contract.
-
-**2. Dispatch (root).** One brief:
-
-```text
-GOAL
-Add CSV export to the report page.
-
-WHY
-Support currently copies numbers out of the table by hand.
-
-SCOPE
-- a route that streams the current report as CSV
-- a download control on the report page
-- tests for the route's happy path and its 401 path
-
-NON-GOALS
-- no other export formats
-- no changes to the report query
-- no styling beyond the single control
-
-CONSTRAINTS / CONTRACTS
-- the existing report JSON shape must not change
-- reuse the existing auth middleware
-
-ACCEPTANCE CRITERIA
-- GET /reports/:id/export.csv returns text/csv, a header row, and one row per record
-- unauthenticated requests still return 401
-- the control downloads with the current filter applied
-
-KNOWN RELEVANT PATHS
-- apps/web/src/reports/routes.ts
-- apps/web/src/reports/ReportPage.tsx
-
-VERIFICATION
-- npm test and npm run lint in apps/web; fix ordinary in-scope failures first
-
-RETURN FORMAT
-- STATUS / SUMMARY / CHANGED / VERIFICATION / RISKS / DECISIONS
-```
-
-**3. Worker run.** The worker reads the routes, finds an existing streaming
-helper it was not told about, uses it, adds three tests, hits one failure in the
-filtered-export case, fixes it, and reports `ready_for_review` with the commands
-it ran.
-
-**4. Review (root, one batch).** The diff matches the contract. Two findings:
-the CSV writer does not escape embedded quotes, and the new route is missing
-from the route-level auth test list. Both are real; both are in scope.
-
-**5. One correction dispatch.** Both findings, one message, same return format.
-The worker fixes both, adds the escaping test, and reports again.
-
-**6. Acceptance and state.** The root re-reviews only the delta, accepts, and
-updates `PROJECT_STATE.md`: the CSV export moves into "accepted, pending
-release", a note records that report exports now share the streaming helper,
-and "notify support about the new download" becomes a next step.
-
-Total: one scope pass, one dispatch, one wait, one review, one correction, one
-state update. That is the whole workflow.
-
-## Adoption notes
-
-- Start with one project, not every project.
-- Keep the first brief modest. The workflow is easier to trust after one clean
-  end-to-end pass.
-- If the worker's reports are consistently thin, the brief is the problem.
-- If the root is consistently rewriting worker code, the bundle was too small or
-  the brief too vague.
-- If the state file grows past a screen or two, someone is writing history
-  instead of state.
-
-## Related documents
-
-- `README.md` - what this repository is and how to install it.
-- `INSTALL.md` - installation details, flags, and what is written where.
-- `QUICKSTART.md` - first dispatch, step by step.
-- `SECURITY.md` - secrets, trust, and hook safety.
-- `TROUBLESHOOTING.md` - symptoms and fixes.
-- `skill/SKILL.md` - the operational instructions the root model loads.
-- `skill/references/` - delegation contract, state policy, routing notes.
+# Architecture: Native Codex project orchestration
+
+This repository packages a Codex skill, custom subagent definitions, a small local backlog/state CLI, optional project hooks, and an installer. The workflow coordinates work; it does not run a daemon, launch models itself, or guarantee provider billing. Codex performs agent routing through its native subagent support.
+
+## Roles and model settings
+
+The native mode pins a model and reasoning effort for each role:
+
+| Role | Model | Effort | Responsibility |
+| --- | --- | --- | --- |
+| Primary director session (`orchestrator-director` profile) | `gpt-6.1-sol` | `high` | Scope, contracts, backlog, assignment, integration, decisions and final acceptance. Never implements code, even for a small task. |
+| `sol_senior` | `gpt-6.1-sol` | `high` | Escalated implementation after a Luna attempt or a justified high-complexity assignment. |
+| `sol_reviewer` | `gpt-6.1-sol` | `high` | Independent read-only review for high-risk work. |
+| `luna_worker` | `gpt-6-luna` | `medium` | Bounded implementation tasks that meet their acceptance contract. |
+| `luna_reviewer` | `gpt-6-luna` | `high` | Independent pass/fail/inconclusive review; does not edit the code under review. |
+| `luna_state_editor` | `gpt-6-luna` | `low` | Makes a narrow state-file update from director instructions; director checks the short diff. |
+| `astra_consultant` | `gpt-6-astra` | `high` | Rare advice on a consequential unresolved architecture question. It does not take over implementation or decisions. |
+
+The director is the primary session selected with the `orchestrator-director` config profile; it is not a custom child agent and must not spawn another director. Exactly six standalone custom-agent files define the Luna worker, Luna reviewer, state editor, Sol senior implementer, read-only Sol reviewer, and Astra consultant. These are configured values, not a promise that every account can run every role. The configured IDs are `gpt-6.1-sol`, `gpt-6-luna`, and `gpt-6-astra`; availability depends on the active account and client. Codex must report unavailable roles or failed routing; it must never silently substitute another model. The historical name `astra_flash_builder` referred to the old DeepSeek route in some installs. It is not an alias for `astra_consultant`; inspect its configuration and migrate deliberately.
+
+Custom subagents use Codex TOML definitions with `name`, `description`, `developer_instructions`, `model`, and `model_reasoning_effort`. The role and director templates currently contain `service_tier = "standard"`, but the official Codex schema documents this field only as a preferred string tier and does not explicitly validate either `standard` or `default` as the Standard selector. The API response label `default` is not proof that the TOML accepts that value. Treat the template value as unverified until an isolated desktop pilot confirms config loading and Standard dispatch; do not edit the active Codex home. The six child role files set `[agents] enabled = false`; the Sol reviewer also sets `sandbox_mode = "read-only"`. The primary profile selects Sol high and enables delegation. The concurrent thread cap belongs in `[agents] max_concurrent_threads_per_session` and excludes the primary agent. See the [official subagent configuration reference](https://learn.chatgpt.com/docs/agent-configuration/subagents). Do not alter global Codex configuration automatically.
+
+## Work lifecycle
+
+1. The director reads the project's compact state and inspects the relevant code. It writes an observable goal and acceptance criteria before implementation.
+2. The director records backlog items with an ID, goal, dependencies, priority, risk, change area, acceptance criteria, owner, and status. Only ready items with completed dependencies can be assigned. One task cannot have two owners at once.
+3. The director selects concurrency from independent ready work, shared resources, and review capacity, subject to two separate ceilings: the ledger reservation cap for in-flight tasks and Codex spawned-agent thread cap. Integrated tasks awaiting final completion retain a ledger reservation. Neither cap is a target; the director does not fill it automatically. Tasks that touch the same file, API contract, schema, migration, or test environment need explicit exclusive ownership or serialization. Separate worktrees are useful when Codex supports them and the tasks justify the setup; worktrees do not require commits.
+4. A worker receives only its contract, relevant context, and an explicit file/resource boundary. It reports changed paths, exact commands and outcomes, and unresolved issues. It does not broaden its scope or make commits.
+5. For significant work, an independent Luna reviewer prepares acceptance scenarios before coding and checks the contract, diff, surrounding code, and behavior. It returns `pass`, `fail`, or `inconclusive` with evidence and does not fix the implementation. Concrete reproducible defects go back to the owner; unclear requirements return to the director. Unrun checks remain unverified. High-risk security, permission, migration, concurrency, and similar changes need stronger independent Sol review or Astra advice; Luna approval alone does not close those risks.
+6. The director integrates changes and reviews the exact combined state. A dependency becomes ready only after its prerequisite is integrated and independently verified on that snapshot. A task is complete only after integration and acceptance of that combined state.
+7. The configured review-round limit includes the initial independent review and the bounded Luna correction review. Once those rounds are exhausted, the director diagnoses whether the issue is implementation difficulty, a wrong or unclear requirement, or the environment. The CLI allows a configured, finite number of escalations (default one) to `sol_senior`; it carries the current diff, reproduction, and prior attempts and adds one review round. Further work becomes a separate director-created task. An inconclusive review blocks the task. The director can replan it with a recorded resolution and, when needed, explicit new goal, scope, or acceptance fields. The ledger records old and new contract values and checks scope conflicts again at assignment. Prefer a separate follow-up task for substantially different work. No blind retry loop is allowed.
+8. The director asks `luna_state_editor` for a compact state update when needed, then checks its diff.
+
+The first version is a director-controlled workflow, not a background scheduler. The local CLI records and validates state transitions; Codex itself launches the assigned agents. See [QUICKSTART.md](QUICKSTART.md) and [INSTALL.md](INSTALL.md) for the implemented command surface.
+
+## Review and recovery
+
+The reviewer plans tests from the original task before seeing the implementation when the change is significant. Its findings must distinguish observed behavior from inferred risks and list both failed and unrun checks. The director resolves disagreements and judges the evidence. A correction request contains all concrete findings in one bounded package.
+
+On interruption, preserve the working tree and recorded owner/status. Resume by inspecting the current diff and revalidating scope. Reassign only after the director confirms the previous worker stopped and its changes are safe to continue; the ledger stop-owner field is a declaration, not process control. Do not discard or overwrite an interrupted worker's changes. Keep one writer per shared file at a time.
+
+## Competing hypotheses
+
+Effort adaptation is a task-specific launch recommendation, not a runtime guarantee: use director xhigh for a complex initial plan, architecture, or contradictions; Luna worker high for nontrivial logic and low only for exact mechanical edits; Sol senior xhigh for a complex reproducible bug; Sol reviewer xhigh for concurrency, data-loss risk, or complex interactions; state editor medium to reconcile reports; Astra xhigh only for an especially complex architecture choice. Record the reason in the task. Apply a change only through supported launch controls; otherwise keep the configured role default and report that effort could not be adjusted. The director high default remains primary; effort changes do not change Luna-first routing.
+
+For a persistent bug or architectural uncertainty, the director can set up two independent research tasks with different hypotheses or candidate designs. It states the question, constraints, budget, and stop condition first. Researchers return evidence and a proposed discriminating check; they do not duplicate full implementations. Astra is consulted only if its answer could change the choice. If prototypes are warranted, compare each against the same acceptance criteria and integrate only a selected, verified result.
+
+## Project state and freshness
+
+The durable memory is `.codex/PROJECT_STATE.md`, kept separate per project and limited to useful facts, hypotheses, plans, accepted changes, blockers, and verification outcomes. Do not put secrets, credentials, full chat history, logs, or unfiltered command output in it. One state editor writes on director instruction; the director reviews the diff. Keep confirmed facts distinct from hypotheses and plans. Record failed and not-run checks explicitly.
+
+The existing hooks inject state on session startup, resume, clear, and compaction, and the Stop hook can issue one freshness nudge. They are convenience hooks, not a scheduler or security boundary. The local ledger is `.codex/ORCHESTRATOR.json`. Task review/integration uses an exact fingerprint of the HEAD commit, semantic index entries (modes, blob IDs, conflict stages), and dirty content. State uses a separate `state_fingerprint` from the HEAD tree, semantic index, and dirty content while excluding project-state and orchestration bookkeeping. Index stat-cache changes do not stale either fingerprint, and a state-only commit does not stale the state marker; a source commit still does even with a clean worktree. On drift, inspect affected paths before rereading larger areas. Record the `state_fingerprint` HTML marker after semantic state updates. SessionStart warns when the marker is missing; Stop is quiet for a clean unmarked legacy state and nudges once when missing or stale state coincides with dirty or HEAD drift. The bundled helper uses content fingerprints; only older hook installations without that helper retain the timestamp fallback.
+
+## Context and spend discipline
+
+The role templates currently contain `service_tier = "standard"`, but its acceptance by the installed Codex TOML schema is unverified. Do not replace it with `default` based on API response terminology. In an isolated desktop pilot, load the templates through a temporary Codex home and project, confirm no config error, then verify the active app exposes and uses Standard. If Standard cannot be confirmed, report the blocker and do not switch to Fast. The native collaboration interface may not expose per-call service-tier metadata, so distinguish the requested tier from observed dispatch. Do not claim a live delegation used Standard without evidence. Model and reasoning configuration are also not proof of actual routing. Give each agent only its task contract and needed context; ordinary child roles cannot delegate. Bound review and consultation rounds, and use concurrency only when work is independent and review capacity is available. No percentage savings are claimed without measurements.
+
+## Evidence and validation limits
+
+A configured TOML file proves only that model, effort, and a candidate `service_tier` string are present; it does not prove that the string is accepted or used for a live inference. If dispatch metadata does not expose service tier, report it as unverified. The Python ledger records manual attestations for test commands, actor/reviewer IDs, roles, fresh context, and prior-owner stop status; it does not run those commands, authenticate identities, prove context isolation, stop processes, or verify actual routing/billing. A CLI transition test proves local bookkeeping behavior; it does not prove Codex agent execution. Clearly label live delegated calls, module tests, and described-but-unexercised behavior separately. Never say a test passed if it did not run. Inspect the exact integrated diff and evidence before acceptance.
+
+## Pilot
+
+Use a disposable or low-risk project first. Inspect the installer's dry run and verify output in an isolated test Codex home and project. Start with one bounded, non-production task and one Luna worker, then run the independent review and inspect the integrated diff and project state. Exercise dependency blocking, interruption/reassignment, and stale-context refresh with the CLI's local checks before relying on them. Do not install into a production Codex configuration or publish the package as part of a pilot.
+
+## Further reading
+
+- [Quickstart](QUICKSTART.md): a first task and sample brief.
+- [Installation](INSTALL.md): dry run, isolated verification, and install scope.
+- [Skill instructions](skill/SKILL.md): what the director does in a task.
+- [Routing](skill/references/ROUTING.md): role IDs, configuration, and verification limits.
+- [Delegation contract](skill/references/DELEGATION_CONTRACT.md): task and review brief fields.
+- [State policy](skill/references/STATE_POLICY.md): state schema and freshness.

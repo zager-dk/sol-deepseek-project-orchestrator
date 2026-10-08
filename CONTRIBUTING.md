@@ -1,65 +1,39 @@
 # Contributing
 
-Thanks for taking a look. This repository is small on purpose: the value is in
-the workflow being clear enough that someone can adopt it without asking
-questions.
+Keep the workflow understandable and its claims tied to behavior. The current design uses native Codex custom subagents with a director-managed local backlog; it does not include an external router or a background scheduler.
 
-## Before you open a pull request
+## Before proposing a change
 
-1. Run the test suite:
+- Read [ARCHITECTURE.md](ARCHITECTURE.md) and the relevant reference under `skill/references/`.
+- Preserve the primary director's no-implementation boundary, the six child roles, their model/effort settings, and the current candidate `service_tier` string. Its accepted Standard value is unverified; do not treat `standard` and `default` as interchangeable. Do not describe config or actor labels as proof of dispatch or identity.
+- Keep the install path isolated and explicit. Do not add global Codex configuration writes, network access, or secret handling.
+- Update user-facing docs, examples, and tests when command behavior changes.
 
-   ```bash
-   python -m unittest discover -s tests -v
-   ```
+## Validation
 
-2. If you changed the installer behavior, add or update a test that would fail
-   without your change.
-3. If you changed the workflow, update `ARCHITECTURE.md` and `skill/SKILL.md`
-   together, plus the matching reference under `skill/references/`. The
-   explanation and the operational instructions must not drift apart.
-4. If you changed hook behavior, describe the exact hook event, input, and
-   output you relied on. Cite the release documentation rather than a
-   development branch of the schemas.
+Run the checks appropriate to the change. For code changes, the current suite is:
 
-## What tends to get accepted
+```bash
+python -m unittest discover -s tests -v
+```
 
-- Fixes that keep the safety properties in [SECURITY.md](SECURITY.md): no silent
-  overwrites, no secret handling, no network use in the installer, hooks that
-  fail open.
-- Documentation that removes a real ambiguity a reader would hit.
-- Portability fixes for Windows, macOS, and Linux that stay inside the Python
-  standard library.
-- Test coverage for behavior that could plausibly regress.
+For documentation-only changes, check commands and file paths against the current implementation and search for stale role names or unsupported promises. Do not add or claim a test that was not run. Installation changes must be checked in throwaway Codex-home and project directories.
 
-## What tends to get pushed back
+The installer and verifier can validate config values and local ledger behavior. They do not prove a live model call or service tier. The Python ledger is separate from the `codex` runtime CLI. Report module tests, actual delegated calls, and unverified behavior separately.
 
-- Making the installer write into a guessed Codex home.
-- Adding a bundled dependency, especially a non-stdlib one, without a strong
-  reason.
-- Making a hook able to block a user's turn on a hook bug.
-- Adding workflow features that exist only to add parallelism. The workflow is
-  deliberately one root, one worker, one review.
+## Review principles
 
-## Style
-
-- Python: standard library only, type hints where they help, no f-strings with
-  side effects in log paths, and comments only where the intent is not obvious.
-- Markdown: short sections, tables where they genuinely compress information,
-  and no unexplained jargon.
-- ASCII by default. `README_RU.md` is the one documented non-ASCII file.
+- Backlog records need ID, goal, dependencies, priority, risk, scope, acceptance, owner, and status.
+- Assignment must prevent duplicates and respect dependencies and exclusive shared-resource ownership.
+- Interruption recovery preserves changes and records a declaration that the old agent stopped; the CLI cannot verify or terminate its process.
+- Review is independent and returns pass, fail, or inconclusive with evidence. It never edits the reviewed implementation.
+- Integration checks the exact combined state before dependents are unlocked.
+- Keep correction and consultation cycles bounded.
 
 ## Reporting issues
 
-Include the output of:
-
-```bash
-python scripts/verify_install.py --project /path/to/project --codex-home /path/to/.codex --self-test
-```
-
-and your operating system plus Python version. Do not include real router
-capability URLs, API keys, or private repository paths.
+Include a minimal reproduction, exact commands and outcomes, and relevant platform/Python versions. Remove secrets, private paths, and project-state contents.
 
 ## License
 
-By contributing, you agree that your contributions are licensed under the MIT
-License in [LICENSE](LICENSE).
+Contributions are licensed under the MIT License in [LICENSE](LICENSE).
