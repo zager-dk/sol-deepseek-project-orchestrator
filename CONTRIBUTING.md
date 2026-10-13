@@ -5,7 +5,7 @@ Keep the workflow understandable and its claims tied to behavior. The current de
 ## Before proposing a change
 
 - Read [ARCHITECTURE.md](ARCHITECTURE.md) and the relevant reference under `skill/references/`.
-- Preserve the primary director's no-implementation boundary, the six child roles, their model/effort settings, and the current candidate `service_tier` string. Its accepted Standard value is unverified; do not treat `standard` and `default` as interchangeable. Do not describe config or actor labels as proof of dispatch or identity.
+- Preserve the director's no-implementation boundary, six role responsibilities, independent acceptance, read-only review, and explicit user model/speed/effort choices. Templates provide defaults and inherit speed; no Standard-only gate is permitted. Unknown mode metadata is not an execution error. Do not describe config or actor labels as proof of dispatch or identity.
 - Keep the install path isolated and explicit. Do not add global Codex configuration writes, network access, or secret handling.
 - Update user-facing docs, examples, and tests when command behavior changes.
 

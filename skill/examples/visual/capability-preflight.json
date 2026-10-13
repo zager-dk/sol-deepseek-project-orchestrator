@@ -1,0 +1,40 @@
+{
+  "capabilities": {
+    "reference_search": {
+      "status": "unavailable",
+      "evidence": "Not checked yet. Replace only after observing the named capability in this environment."
+    },
+    "image_inspection": {
+      "status": "unavailable",
+      "evidence": "Not checked yet. Replace only after observing the named capability in this environment."
+    },
+    "editable_export": {
+      "status": "unavailable",
+      "evidence": "Not checked yet. Replace only after observing the named capability in this environment."
+    },
+    "preview_export": {
+      "status": "unavailable",
+      "evidence": "Not checked yet. Replace only after observing the named capability in this environment."
+    },
+    "custom_roles": {
+      "status": "unavailable",
+      "evidence": "Not checked yet. Replace only after observing the named capability in this environment."
+    },
+    "image_generation": {
+      "status": "unavailable",
+      "evidence": "Not checked yet. Replace only after observing the named capability in this environment."
+    },
+    "video_generation": {
+      "status": "unavailable",
+      "evidence": "Not checked yet. Replace only after observing the named capability in this environment."
+    },
+    "browser_interaction": {
+      "status": "unavailable",
+      "evidence": "Not checked yet. Replace only after observing the named capability in this environment."
+    },
+    "temporal_inspection": {
+      "status": "unavailable",
+      "evidence": "Not checked yet. Replace only after observing the named capability in this environment."
+    }
+  }
+}

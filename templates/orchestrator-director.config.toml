@@ -1,9 +1,9 @@
+# Optional setup defaults; preserve explicit user settings. Speed is inherited.
 # Primary-session config profile. Install at <CODEX_HOME>/orchestrator-director.config.toml.
 # Set CODEX_HOME to that home and run `codex --profile orchestrator-director`
 # from the target project directory.
 model = "gpt-6.1-sol"
 model_reasoning_effort = "high"
-service_tier = "standard"
 
 [agents]
 enabled = true

@@ -8,6 +8,7 @@ Keep only information that helps the next task start accurately:
 
 - project intent and current milestone;
 - durable architecture, contracts, and constraints;
+- for deployed work only, the release/rollback procedure path and revision, target environment, checked prerequisites, backup/restore evidence, and conditions that need revalidation;
 - confirmed facts, clearly marked hypotheses, and plans as distinct items;
 - backlog summary, active work, accepted integrated changes, and blockers;
 - verification baseline and actual outcomes, including failed and unrun checks;
@@ -28,6 +29,12 @@ At task start, compare the HTML marker in `.codex/PROJECT_STATE.md` with `state_
 Each task record in `.codex/ORCHESTRATOR.json` has an ID, goal, dependencies, priority, risk, scope, acceptance criteria, owner, and state. Assignment requires completed dependencies and no existing owner. Keep one writer on a shared file or serialize those tasks. Interrupted tasks retain their changes and history. Reassignment requires a director declaration that the prior agent stopped, plus a safe handoff of the current diff and remaining work. Actor IDs, freshness flags, and stop-owner declarations are not authenticated; they neither prove a separate context nor terminate a process.
 
 The local CLI validates bookkeeping transitions; it does not spawn Codex agents or provide a background scheduler. The director remains responsible for model dispatch, inspection, and integration.
+
+## Visual task state
+
+For visual profiles, keep only a compact summary in project memory: task/profile, spec revision and stage, selected direction/palette, approval source references, capability blockers, editable/preview/report paths, and actual QA outcomes. Keep detailed spec, artifact fingerprints, approval records, and observation evidence in the ledger, with source assets in project-contained files. Do not duplicate full user quotes or large manifests in state. See [Visual workflow](VISUAL_WORKFLOW.md) for the exact records.
+
+The visual stage (`directions`, `prototype`, `production`, `qa`, `delivery`) supplements the task state; it is not a replacement for `planned` through `completed`. Preflight and approvals bind to spec and contract revisions. Artifact bytes are checked independently of Git ignore rules, and visual QA also binds to ownership history and attempt. Record a new spec for direction, palette, or agreed scope changes; refresh approvals and review rather than carrying a stale pass forward. If a required capability is unavailable, preserve that blocker or the user's sourced agreement to reduced scope. Never mark visual QA passed because a command accepted manual JSON.
 
 ## Hooks
 

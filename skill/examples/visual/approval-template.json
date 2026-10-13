@@ -1,0 +1,15 @@
+{
+  "decision": "pending",
+  "origin": "user",
+  "approved_by": "",
+  "source": "",
+  "quote": "",
+  "revision": 1,
+  "direction_id": "a",
+  "palette": [
+    "#F5F2EB",
+    "#20312B",
+    "#5F7161"
+  ],
+  "note": "Intentionally rejected. Copy actual user approval source/quote; for prototype use artifact_digest from visual-status instead of direction_id/palette."
+}

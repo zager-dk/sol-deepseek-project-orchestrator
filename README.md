@@ -1,5 +1,7 @@
 # Sol + Luna Project Orchestrator
 
+Current release: [v0.2.0](https://github.com/zager-dk/sol-deepseek-project-orchestrator/releases/tag/v0.2.0). The complete ZIP package includes the skill, installer, role templates, hooks, examples, and tests; extract it before running the explicit-target installer.
+
 ## Optional ledger storage directory
 
 By default the runtime keeps its ledger and lock in the project's `.codex` directory. To move only that bookkeeping data, explicitly bind a contained ordinary directory once:
@@ -29,7 +31,7 @@ Start with [QUICKSTART.md](QUICKSTART.md). For the complete workflow and its lim
 | `luna_state_editor` | `gpt-6-luna`, low | Narrow state edits under director instruction. |
 | `astra_consultant` | `gpt-6-astra`, high | Rare, decision-changing architecture advice. |
 
-The primary profile and six child files currently contain `service_tier = "standard"`, but the installed TOML contract does not explicitly confirm that literal. Do not substitute `default` based on API response terminology. Confirm loading and Standard dispatch in an isolated desktop pilot. The model and effort values are template requests, not runtime proof. Per-task effort adaptations are suggestions for supported launch controls, not a runtime guarantee; task reasons should be recorded. Preserve Luna-first routing. These configuration values do not prove runtime dispatch. Delegated inference availability is account-specific; unavailable roles must be reported without silent substitution.
+Role model and effort values are defaults for an explicitly chosen orchestration setup. The user's selected model, speed/service tier, and reasoning effort take precedence. Preserve them in the primary session and dispatch; do not change them automatically or apply role defaults over an explicit choice. Recommend a different effort only when useful, and apply it only through supported controls with user authorization. Omit service-tier overrides from new templates so the client can inherit the selected speed. Standard, other supported modes, and absent or unknown mode metadata do not block work. Unknown metadata remains unverified; do not invent a selector or map UI labels to TOML values. If the platform rejects an actual model or setting, describe the concrete availability/configuration error separately and preserve the selection; do not call it a Standard-mode failure or silently substitute a model. Sandbox, approvals, and platform limits still apply.
 
 ## Included
 
@@ -40,6 +42,14 @@ The primary profile and six child files currently contain `service_tier = "stand
 - `hooks/`: project state injection and freshness nudge hooks.
 - `scripts/install.py`, `scripts/verify_install.py`, `scripts/uninstall.py`: explicit-target installation, verification, and cleanup.
 - `tests/`: isolated non-destructive checks.
+
+## Visual project profiles
+
+Alongside the default `code` workflow, `add --profile` accepts `visual-design`, `ux-ui`, `storyboard`, and `motion-fx`. They use the same Sol director/router, six child roles, Luna-first implementation, independent review, and integration gates. No Unreal Engine integration is included.
+
+The visual path is brief → real inspected reference links with take/avoid notes → 2–3 directions with boards, palettes, and motion references when relevant → explicit user direction approval → rendered prototype approval → production → independent visual QA → editable sources, preview, and report. A sourced, versioned, user-approved existing style can supply one direction. Capabilities must be observed in the current environment; a missing required capability blocks work unless the user agrees to a newly specified reduced scope. Generators are optional when not required by the brief.
+
+The reviewer actually opens current renders, tests UI interactions/responsive behavior/accessibility, and plays motion previews in full. The CLI records version-bound manual evidence and checks file fingerprints; it does not run visual tools or authenticate approvals. See [Visual workflow](skill/references/VISUAL_WORKFLOW.md) for commands, JSON schemas, four profile checklists, and starter examples. `stats --format json` includes a visual category sidecar; it makes no observed model/token/cost claims.
 
 ## Install and verify in isolation
 

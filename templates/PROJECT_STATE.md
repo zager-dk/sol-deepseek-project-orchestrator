@@ -35,6 +35,16 @@ _One short paragraph: what this repository or product is trying to achieve._
 
 - _The commands or checks that currently define a healthy project._
 
+## Visual work (omit when unused)
+
+- **Task / profile / spec revision / stage:** _visual-design, ux-ui, storyboard, or motion-fx; current version and stage._
+- **Direction / palette / approvals:** _selected direction, exact palette, and source references for user direction and prototype approval; existing style source/version if used._
+- **Capabilities / blockers:** _observed availability, missing required capabilities, or sourced user agreement to revised scope._
+- **Deliverables:** _paths to current editable sources, rendered preview, and report; detailed manifests stay in the ledger._
+- **Visual QA:** _independent reviewer and observed results; UI interaction/responsive/accessibility evidence or motion full-playback evidence as applicable; failed and unrun checks._
+
+_Follow the skill's Visual workflow reference. A new direction needs a new spec and approvals; the CLI records manual evidence and does not inspect or authenticate it._
+
 ## Next steps
 
 1. _Highest priority next action._

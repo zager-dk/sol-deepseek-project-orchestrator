@@ -968,19 +968,20 @@ class VerifyInstallTests(TempRepoCase):
         agent.write_bytes(original)
 
     @unittest.skipIf(tomllib is None, 'independent fixture TOML check requires Python 3.11+')
-    def test_verify_rejects_multiline_root_profile_spoof(self) -> None:
+    def test_verify_rejects_multiline_root_safety_spoof(self) -> None:
         self.install()
         profile = self.codex_home / 'orchestrator-director.config.toml'
         text = ('model = "gpt-6.1-sol"\nmodel_reasoning_effort = "high"\n'
                 '"service_tier" = "fast"\ndeveloper_instructions = """\n'
-                'service_tier = "standard"\n"""\n'
-                '[agents]\nenabled = true\nmax_concurrent_threads_per_session = 4\n')
+                '[agents]\nenabled = true\n"""\n'
+                '[agents]\nenabled = false\nmax_concurrent_threads_per_session = 4\n')
         self.assertEqual(tomllib.loads(text)['service_tier'], 'fast')
         profile.write_text(text, encoding='utf-8')
         before = profile.read_bytes()
         result = self.verify('--json')
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn('director profile service_tier', '\n'.join(json.loads(result.stdout)['errors']))
+        self.assertIn('director profile agents.enabled', '\n'.join(json.loads(result.stdout)['errors']))
+        self.assertNotIn('director profile service_tier', '\n'.join(json.loads(result.stdout)['errors']))
         self.assertEqual(profile.read_bytes(), before)
 
     def test_verify_passes_on_a_good_install(self) -> None:
@@ -1082,17 +1083,59 @@ class VerifyInstallTests(TempRepoCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("skill SKILL.md", result.stdout)
 
-    def test_verify_rejects_role_with_wrong_pinned_model_or_effort(self) -> None:
+    def test_verify_preserves_user_selected_model_and_effort(self) -> None:
         self.install()
         agent = self.codex_home / "agents" / "astra-consultant.toml"
         text = agent.read_text(encoding="utf-8").replace(
             'model_reasoning_effort = "high"',
             'model_reasoning_effort = "medium"',
         )
+        text = text.replace('model = "gpt-6-astra"', 'model = "user-selected-model"')
         agent.write_text(text, encoding="utf-8")
+        before = agent.read_bytes()
         result = self.verify()
-        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("agent astra_consultant model_reasoning_effort", result.stdout)
+        self.assertEqual(agent.read_bytes(), before)
+
+    def test_verify_modes_and_missing_metadata_without_rewriting_selections(self) -> None:
+        self.install()
+        files = [self.codex_home / 'orchestrator-director.config.toml']
+        files.extend(sorted((self.codex_home / 'agents').glob('*.toml')))
+        originals = {file: file.read_text(encoding='utf-8') for file in files}
+        # These are syntax/contract cases, not claims that UI names map to
+        # these literals or that the platform ran any live inference.
+        for mode in ('standard', 'default', 'fast', 'ultrafast', 'priority', 'unknown-future-mode', None):
+            with self.subTest(mode=mode):
+                for file, original in originals.items():
+                    text = original
+                    if mode is not None:
+                        text = f'service_tier = "{mode}"\n' + text
+                    text = text.replace('model_reasoning_effort = "high"', 'model_reasoning_effort = "xhigh"')
+                    file.write_text(text, encoding='utf-8')
+                before = {file: file.read_bytes() for file in files}
+                result = self.verify('--json')
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(json.loads(result.stdout)['errors'], [])
+                self.assertEqual({file: file.read_bytes() for file in files}, before)
+
+    def test_verify_inherited_settings_and_invalid_shapes(self) -> None:
+        self.install()
+        agent = self.codex_home / 'agents' / 'sol-reviewer.toml'
+        original = agent.read_text(encoding='utf-8')
+        inherited = '\n'.join(line for line in original.splitlines()
+                              if not line.startswith(('model =', 'model_reasoning_effort =')))
+        agent.write_text(inherited + '\n', encoding='utf-8')
+        result = self.verify('--json')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for setting in ('service_tier = false', 'model = 23', 'model_reasoning_effort = []', 'service_tier = " "'):
+            with self.subTest(setting=setting):
+                agent.write_text(setting + '\n' + inherited, encoding='utf-8')
+                before = agent.read_bytes()
+                result = self.verify('--json')
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn('agent sol_reviewer ' + setting.split(' =')[0], '\n'.join(json.loads(result.stdout)['errors']))
+                self.assertEqual(agent.read_bytes(), before)
 
     def test_verify_rejects_drift_in_read_only_reviewer_settings_without_rewriting(self) -> None:
         self.install()
@@ -1104,7 +1147,7 @@ class VerifyInstallTests(TempRepoCase):
         for filename in role_files:
             role_file = self.codex_home / "agents" / filename
             original = role_file.read_text(encoding="utf-8")
-            modified = original.replace('service_tier = "standard"', 'service_tier = "fast"')
+            modified = 'service_tier = "fast"\n' + original
             modified = modified.replace("enabled = false", "enabled = true")
             if filename == "sol-reviewer.toml":
                 modified = modified.replace('sandbox_mode = "read-only"', 'sandbox_mode = "danger-full-access"')
@@ -1121,7 +1164,7 @@ class VerifyInstallTests(TempRepoCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         errors = "\n".join(json.loads(result.stdout)["errors"])
         for role in ("luna_worker", "luna_reviewer", "luna_state_editor", "sol_senior", "sol_reviewer", "astra_consultant"):
-            self.assertIn(f"agent {role} service_tier", errors)
+            self.assertNotIn(f"agent {role} service_tier", errors)
             self.assertIn(f"agent {role} agents.enabled", errors)
         self.assertIn("agent sol_reviewer sandbox_mode", errors)
         for role_file, modified in modified_files.items():
@@ -1131,7 +1174,7 @@ class VerifyInstallTests(TempRepoCase):
         self.install()
         profile = self.codex_home / "orchestrator-director.config.toml"
         original = profile.read_text(encoding="utf-8")
-        modified = original.replace('service_tier = "standard"', 'service_tier = "fast"')
+        modified = 'service_tier = "fast"\n' + original
         modified = modified.replace("enabled = true", "enabled = false")
         self.assertNotEqual(modified, original, "fixture must alter the installed root profile contract")
         profile.write_text(modified, encoding="utf-8")
@@ -1139,7 +1182,7 @@ class VerifyInstallTests(TempRepoCase):
         result = self.verify("--json")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         errors = "\n".join(json.loads(result.stdout)["errors"])
-        self.assertIn("director profile service_tier", errors)
+        self.assertNotIn("director profile service_tier", errors)
         self.assertIn("director profile agents.enabled", errors)
         self.assertEqual(profile.read_text(encoding="utf-8"), modified)
 

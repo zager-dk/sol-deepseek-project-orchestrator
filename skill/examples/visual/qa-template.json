@@ -1,0 +1,11 @@
+{
+  "reviewer": "",
+  "result": "inconclusive",
+  "findings": "No reviewer has opened the current output yet. This template is not a PASS.",
+  "unrun": [
+    "Open the rendered previews",
+    "Check profile-specific acceptance criteria"
+  ],
+  "opened": [],
+  "checks": {}
+}

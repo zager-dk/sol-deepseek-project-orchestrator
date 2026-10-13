@@ -20,13 +20,13 @@ Use `--prune` only after reading the dry-run plan. It removes unchanged files wh
 
 Check that exactly the six child-role TOML files were copied under `<CODEX_HOME>/agents/` and the separate director profile is at `<CODEX_HOME>/orchestrator-director.config.toml`. The runtime is `<CODEX_HOME>/skills/sol-deepseek-project-orchestrator/scripts/orchestrate.py`. If child roles were intentionally omitted with installer `--no-agent`, run `verify_install.py --no-agent` too; otherwise missing roles are reported as errors. This verifier flag allows absent child files but still verifies every role file that exists, including files without installer ownership. If roles are needed, reinstall without installer `--no-agent` after reviewing the dry run. Restart Codex to reload custom agents. The `name` inside each child TOML is the dispatched role name. The director runs as the primary session. `--no-agent` skips the six child definitions, not the director.
 
-## Native desktop pilot is blocked before child calls
+## Dispatch capability or telemetry is unavailable
 
-The inspected delegated-task route exposes `spawn_agent` with a priority field only; it has no service-tier or role selector. In that route, the skill was read from disk rather than discovered through `skills.list`, and the six TOML roles have not been shown to load into dispatch. Treat the live Standard child-call pilot as blocked until a supported route can load and invoke those roles with Standard. This finding applies to the inspected route, not all Codex desktop chats. A parser accepting `standard`, `default`, or another string is only a syntax/config-load check, not semantic validation of service tier.
+A dispatch route may lack a custom-role selector or model/tier telemetry. Check the actual capability needed for the task, preserve the user's settings, and record what remains unverified. Missing or unfamiliar speed metadata never blocks work. Only an unavailable required dispatch capability or an actual platform model/configuration rejection blocks that route; describe that error precisely.
 
 ## Model unavailable or dispatch fails
 
-Check model ID and effort against account/client availability. The templates currently contain `service_tier = "standard"`, but the official Codex TOML reference does not confirm that literal or `default` as the Standard selector. Verify template loading and Standard selection in an isolated desktop pilot; if Standard cannot be confirmed, report the blocker and do not silently choose Fast. The model catalog can change. Do not silently substitute another role. Record the failure and decide whether to wait, correct configuration, or stop. A local verifier cannot prove a live inference will succeed.
+Check an actual dispatch failure against account/client model availability and the effective configuration. Do not infer unavailability from a mode other than Standard. The skill accepts Standard, other supported modes, and missing/unknown mode data, and it never silently switches model, speed, or effort. A local verifier cannot prove a live call will succeed. Report the observed platform error separately.
 
 If an old configuration has `astra_flash_builder`, inspect its TOML: historical installs used that name for a DeepSeek route. It is not the new `astra_consultant` role.
 

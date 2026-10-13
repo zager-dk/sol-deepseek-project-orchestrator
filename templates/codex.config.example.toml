@@ -1,3 +1,4 @@
+# Optional setup defaults; preserve explicit user settings. Speed is inherited.
 # Example primary-session profile configuration. The canonical installable
 # profile is templates/orchestrator-director.config.toml. See the official
 # Codex config reference for profile files and `--profile` selection.
@@ -6,7 +7,6 @@
 # from the target project directory.
 model = "gpt-6.1-sol"
 model_reasoning_effort = "high"
-service_tier = "standard"
 
 [agents]
 enabled = true

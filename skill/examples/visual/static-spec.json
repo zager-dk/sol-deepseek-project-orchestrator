@@ -1,0 +1,77 @@
+{
+  "brief": {
+    "idea": "Compare two directions for a calm project overview",
+    "audience": "People reviewing a small personal project",
+    "constraints": [
+      "Smoke fixture only; no publishing",
+      "No generation tool is presumed available",
+      "Replace inspection_source with actual reference-tool observations before real use"
+    ]
+  },
+  "references": [
+    {
+      "id": "contrast",
+      "url": "https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html",
+      "take": "Readable foreground/background contrast",
+      "avoid": "Treating contrast alone as complete visual quality",
+      "inspection_source": "TEMPLATE: open and inspect this source in the active environment",
+      "kind": "ui"
+    },
+    {
+      "id": "button",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/button/",
+      "take": "Clear button labels and keyboard activation",
+      "avoid": "Replacing native buttons with unnecessary custom controls",
+      "inspection_source": "TEMPLATE: open and inspect this source in the active environment",
+      "kind": "ui"
+    }
+  ],
+  "directions": [
+    {
+      "id": "a",
+      "summary": "Quiet editorial: warm paper, spacious type, restrained accent",
+      "palette": [
+        "#F5F2EB",
+        "#20312B",
+        "#5F7161"
+      ],
+      "reference_ids": [
+        "contrast",
+        "button"
+      ],
+      "board": {
+        "path": "examples/visual/board-a.svg",
+        "format": "svg"
+      }
+    },
+    {
+      "id": "b",
+      "summary": "Bold utility: dark field, compact grid, strong accent",
+      "palette": [
+        "#101820",
+        "#F4F7F8",
+        "#A8FF60"
+      ],
+      "reference_ids": [
+        "contrast",
+        "button"
+      ],
+      "board": {
+        "path": "examples/visual/board-b.svg",
+        "format": "svg"
+      }
+    }
+  ],
+  "deliverables": {
+    "editable": [
+      "svg"
+    ],
+    "preview": [
+      "png"
+    ],
+    "report": [
+      "txt"
+    ]
+  },
+  "required_capabilities": []
+}

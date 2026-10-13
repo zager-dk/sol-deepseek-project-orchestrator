@@ -98,7 +98,24 @@ def check_config_contract(data: dict, contract: dict, label: str, report: Report
         matches = (isinstance(values, dict) and key not in values) if expected is None else (
             type(actual) is type(expected) and actual == expected)
         report.check(f"{label} {table + '.' if table else ''}{key}", matches,
-                     f"expected configured value {expected if expected is not None else '<unset>'!r}; service_tier is a request and does not prove runtime execution tier")
+                     f"expected configured value {expected if expected is not None else '<unset>'!r}")
+
+
+def check_selection_settings(data: dict, label: str, report: Report) -> None:
+    """Check optional setting shapes, never impose a mode or user selection.
+
+    Absent settings inherit from the active client. Nonempty strings, including
+    unknown tier metadata, are preserved; only the runtime can establish actual
+    support/availability. This verifier is read-only and does not launch models.
+    """
+    for key in ("model", "model_reasoning_effort", "service_tier"):
+        if key not in data:
+            report.check(f"{label} {key}", True, "inherited; runtime value unverified")
+            continue
+        value = data[key]
+        valid = isinstance(value, str) and bool(value.strip())
+        report.check(f"{label} {key}", valid,
+                     "optional nonempty string; runtime support/selection unverified")
 
 
 def parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
@@ -139,23 +156,28 @@ def check_layout(project: Path, codex_home: Path, report: Report, *, no_agent: b
         (skill_dir / "scripts" / "orchestrate.py").is_file(),
         str(skill_dir / "scripts" / "orchestrate.py"),
     )
-    for reference in ("DELEGATION_CONTRACT.md", "STATE_POLICY.md", "ROUTING.md"):
+    for reference in ("DELEGATION_CONTRACT.md", "STATE_POLICY.md", "ROUTING.md", "VISUAL_WORKFLOW.md", "RELEASE_WORKFLOW.md"):
         path = skill_dir / "references" / reference
         report.check(f"skill reference {reference}", path.is_file(), str(path))
+
+    for filename in ('static-spec.json', 'ui-spec.json', 'capability-preflight.json',
+                     'approval-template.json', 'qa-template.json', 'board-a.svg', 'board-b.svg', 'ui-prototype.html'):
+        path = skill_dir / 'examples' / 'visual' / filename
+        report.check(f'visual example {filename}', path.is_file(), str(path))
 
     root_profile = codex_home / ROOT_PROFILE_NAME
     report.check("director root profile present", root_profile.is_file(), str(root_profile))
     if root_profile.is_file():
         profile = read_toml_config(root_profile, "director profile", report)
         root_contract = {
-            ("", "model"): "gpt-6.1-sol",
-            ("", "model_reasoning_effort"): "high",
-            ("", "service_tier"): "standard",
             ("agents", "enabled"): True,
-            ("agents", "max_concurrent_threads_per_session"): 4,
         }
         if profile is not None:
             check_config_contract(profile, root_contract, "director profile", report)
+            check_selection_settings(profile, "director profile", report)
+            cap = profile.get("agents", {}).get("max_concurrent_threads_per_session") if isinstance(profile.get("agents"), dict) else None
+            report.check("director profile agents.max_concurrent_threads_per_session",
+                         type(cap) is int and cap > 0, "expected positive integer; actual platform cap applies")
 
     # Ownership manifests say who may remove a file, not whether its installed
     # configuration needs verification or whether --no-agent was requested.
@@ -177,14 +199,12 @@ def check_layout(project: Path, codex_home: Path, report: Report, *, no_agent: b
         data = read_toml_config(agent, f"agent {role}", report)
         contract = {
             ("", "name"): role,
-            ("", "model"): model,
-            ("", "model_reasoning_effort"): effort,
-            ("", "service_tier"): "standard",
             ("", "sandbox_mode"): ROLE_SANDBOX[filename],
             ("agents", "enabled"): False,
         }
         if data is not None:
             check_config_contract(data, contract, f"agent {role}", report)
+            check_selection_settings(data, f"agent {role}", report)
 
     legacy = codex_home / "agents" / "deepseek-worker.toml"
     if legacy.is_file():
@@ -208,7 +228,7 @@ def check_layout(project: Path, codex_home: Path, report: Report, *, no_agent: b
 
     report.warn(
         "model execution",
-        "verification checks configured model and effort values only; it does not invoke agents or prove runtime availability",
+        "verification checks optional setting shapes and role/safety contracts; it does not invoke agents or prove runtime model availability, effort, or speed",
     )
 
     state = project / ".codex" / "PROJECT_STATE.md"

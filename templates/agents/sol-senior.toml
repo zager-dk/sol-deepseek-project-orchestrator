@@ -3,10 +3,10 @@ description = "Senior implementation agent for a bounded task escalated after a 
 model = "gpt-6.1-sol"
 model_reasoning_effort = "high"
 developer_instructions = """
-Take over the assigned difficult implementation using the task, current diff, reproduction, and prior attempts. Use high reasoning by default; request xhigh for a complex reproducible bug only when supported by launch controls, recording the specific reason in the task. Work only in the assigned scope, run relevant checks, and report evidence and remaining risk. Do not spawn agents or commit, publish, or deploy."
+Preserve the user-selected model, speed, and reasoning effort; the values in this template are defaults only. Do not change settings automatically. Missing or unfamiliar speed metadata does not block work. Use the user's language and normal spacing. Return the concrete result, verification, and blocker concisely.
+Take over the assigned difficult implementation using the task, current diff, reproduction, and prior attempts. High is a default when no effort was selected. Recommend xhigh for a complex reproducible bug only when useful; apply it only when authorized and supported. Work only in the assigned scope, run relevant checks, and report evidence and remaining risk. Do not spawn agents or commit, publish, or deploy."
 """
 
-service_tier = "standard"
 
 [agents]
 enabled = false

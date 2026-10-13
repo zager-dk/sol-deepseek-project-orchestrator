@@ -532,7 +532,7 @@ def stats_report(db: dict[str, Any]) -> dict[str, Any]:
         bytype[e['event']]=bytype.get(e['event'],0)+1
         role=e['requested_role'] or 'unknown'; byrole[role]=byrole.get(role,0)+1
         attempts[e['task_ref']]=max(attempts.get(e['task_ref'],0),e['attempt'])
-    return {'schema':1,'coverage':stats['coverage'],'clock_source':'system_wall_clock_utc','events':events,'summary':{'event_count':len(events),'task_count':len(attempts),'events_by_type':bytype,'events_by_role':byrole,'attempts_by_task':attempts}}
+    return {'schema':1,'coverage':stats['coverage'],'clock_source':'system_wall_clock_utc','events':events,'summary':{'event_count':len(events),'task_count':len(attempts),'events_by_type':bytype,'events_by_role':byrole,'attempts_by_task':attempts},'visual':visual_statistics(db)}
 
 def cmd_stats(a: argparse.Namespace, root: Path) -> None:
     path=codex_dir(root)/DB_REL.name
@@ -625,8 +625,9 @@ def cmd_add(a: argparse.Namespace, root: Path) -> None:
         for dep in deps:
             if dep not in db['tasks']: raise OrchestrationError(f'unknown dependency: {dep}')
         if a.id in deps: raise OrchestrationError('task cannot depend on itself')
+        if a.profile != 'code' and a.review_mode == 'manual-control': raise OrchestrationError('visual profiles require independent acceptance planning')
         if a.review_mode == 'manual-control' and a.risk != 'low': raise OrchestrationError('manual review control opt-out is limited to low-risk tasks')
-        task={'id':a.id,'goal':a.goal,'depends_on':deps,'priority':a.priority,'risk':a.risk,'scope':normalize_scope(a.scope,root), 'acceptance':a.acceptance,'contract_revision':1,'review_mode':a.review_mode,'acceptance_plans':[],'owner':None,'owner_history':[],'attempt':0,'state':'planned','review_rounds':0,'consultations':0,'evidence':[],'snapshot':None,'created_by':a.actor,'created_at':time.time()}
+        task={'id':a.id,'profile':a.profile,'goal':a.goal,'depends_on':deps,'priority':a.priority,'risk':a.risk,'scope':normalize_scope(a.scope,root), 'acceptance':a.acceptance,'contract_revision':1,'review_mode':a.review_mode,'acceptance_plans':[],'owner':None,'owner_history':[],'attempt':0,'state':'planned','review_rounds':0,'consultations':0,'evidence':[],'snapshot':None,'created_by':a.actor,'created_at':time.time()}
         db['tasks'][a.id]=task; log(db,task,'created',a.actor); save(root,db)
     print(a.id)
 
@@ -656,10 +657,16 @@ def cmd_state(a: argparse.Namespace, root: Path, target: str) -> None:
         db=load(root); t=get_task(db,a.id); owner(t,a.actor)
         if target == 'in_progress':
             require_acceptance_plan(t)
+        if target == 'ready_for_review' and t.get('profile', 'code') in VISUAL_PROFILES:
+            require_visual_production(root,t)
+            if not visual_task(t).get('artifacts'): raise OrchestrationError('final visual artifacts required before submission')
+            visual_files_current(root,visual_task(t)['artifacts'])
+            visual_task(t)['stage']='qa'
         prior=t['state']; transition(t,target)
         if target == 'in_progress':
             t['attempt'] = int(t.get('attempt', 0)) + 1
             t.pop('review_snapshot', None)
+            if t.get('visual',{}).get('stage') in {'qa','delivery'}: t['visual']['stage']='production'
         log(db,t,target,a.actor,attempt=t.get('attempt'),owner_role=t.get('owner_role'),_stats_from_state=prior); save(root,db)
 
 def cmd_replan(a: argparse.Namespace, root: Path) -> None:
@@ -682,6 +689,7 @@ def cmd_replan(a: argparse.Namespace, root: Path) -> None:
 
 def require_acceptance_plan(task: dict[str, Any]) -> None:
     if task.get('review_mode') == 'manual-control':
+        if task.get('profile', 'code') in VISUAL_PROFILES: raise OrchestrationError('visual profiles cannot bypass independent acceptance planning')
         if task.get('risk') != 'low':
             raise OrchestrationError('manual review control is permitted only for low-risk tasks')
         return
@@ -761,16 +769,18 @@ def cmd_review(a: argparse.Namespace, root: Path) -> None:
         if t['review_rounds']>=db['config']['review_round_limit'] + t.get('escalations',0): raise OrchestrationError('review round allowance reached; director must re-evaluate or create a follow-up task')
         if a.result == 'pass' and (not a.check or any(not check_passed(c) for c in a.check)):
             raise OrchestrationError('pass requires each --check as PASS; command=...; result=exit 0|passed; evidence=...')
+        if a.result == 'pass': require_visual_qa(root,t)
         senior_evidence=senior_role_evidence(a, t)
         astra_resolution=astra_resolution_evidence(a,t)
         review_from_state=t['state']; review_snapshot=snapshot(root)
-        evidence={'reviewer':a.reviewer,'result':a.result,'checks':a.check,'unrun':a.unrun,'findings':a.findings,'senior_verifier':senior_evidence,'astra_resolution':astra_resolution,'fresh_context':{'attested':True,'items':sorted(set(a.context_item)),'identity_is_manual_attestation':True},'contract_revision':t.get('contract_revision',1),'attempt':t.get('attempt',0),'owner_history_digest':owner_history_digest(t),'time':time.time(),'snapshot':review_snapshot}
+        evidence={'visual_signature':visual_signature(t),'reviewer':a.reviewer,'result':a.result,'checks':a.check,'unrun':a.unrun,'findings':a.findings,'senior_verifier':senior_evidence,'astra_resolution':astra_resolution,'fresh_context':{'attested':True,'items':sorted(set(a.context_item)),'identity_is_manual_attestation':True},'contract_revision':t.get('contract_revision',1),'attempt':t.get('attempt',0),'owner_history_digest':owner_history_digest(t),'time':time.time(),'snapshot':review_snapshot}
         t['review_rounds']+=1; t['evidence'].append(evidence); t['review_snapshot']=review_snapshot
         if a.result=='pass':
             if t['risk'] in {'high','critical'} and not (a.senior_verified or astra_resolution): raise OrchestrationError('high risk needs canonical read-only Sol reviewer verification or recorded canonical Astra consultation with director resolution')
         else:
             target='in_progress' if a.result=='fail' else 'blocked'
             transition(t,target)
+            if t.get('visual') and a.result=='fail': t['visual']['stage']='production'
         log(db,t,'review_'+a.result,a.reviewer,checks=a.check,unrun=a.unrun,findings=a.findings,reviewer_role=a.reviewer_role,reviewer=a.reviewer,_stats_from_state=review_from_state); save(root,db)
 
 def cmd_integrate(a: argparse.Namespace, root: Path) -> None:
@@ -778,6 +788,7 @@ def cmd_integrate(a: argparse.Namespace, root: Path) -> None:
         db=load(root); t=get_task(db,a.id)
         if t['state']!='ready_for_review' or not current_review(t): raise OrchestrationError('current passing review evidence required before integration')
         require_acceptance_plan(t)
+        require_visual_qa(root,t)
         reviewer=t['evidence'][-1]['reviewer']
         if reviewer in set(t.get('owner_history', [])):
             raise OrchestrationError('recorded reviewer is no longer independent of every task author')
@@ -797,9 +808,13 @@ def cmd_complete(a: argparse.Namespace, root: Path) -> None:
         if not t.get('evidence') or not current_review(t): raise OrchestrationError('current passing review evidence is required at completion')
         if t['evidence'][-1]['reviewer'] in set(t.get('owner_history', [])):
             raise OrchestrationError('recorded reviewer is no longer independent of every task author')
+        require_visual_qa(root,t)
         if snapshot(root)!=t['integrated_snapshot']: raise OrchestrationError('integrated snapshot is stale; completion refused')
         if not a.check or any(not check_passed(c) for c in a.check): raise OrchestrationError('completion verification requires --check formatted PASS; command=...; result=exit 0|passed; evidence=...')
-        prior=t['state']; t['state']='completed'; log(db,t,'completed',a.actor,checks=a.check,_stats_from_state=prior); save(root,db)
+        prior=t['state']; t['state']='completed'
+        if t.get('profile', 'code') in VISUAL_PROFILES:
+            t['visual']['stage']='delivery'; visual_event(t['visual'],'delivered','initial')
+        log(db,t,'completed',a.actor,checks=a.check,_stats_from_state=prior); save(root,db)
 
 def cmd_consult(a: argparse.Namespace, root: Path) -> None:
     with locked(root):
@@ -829,6 +844,7 @@ def current_review(task: dict[str, Any]) -> bool:
     return (evidence.get('result') == 'pass'
             and evidence.get('contract_revision') == task.get('contract_revision', 1)
             and evidence.get('attempt') == task.get('attempt', 0)
+            and evidence.get('visual_signature') == visual_signature(task)
             and evidence.get('owner_history_digest') == owner_history_digest(task)
             and evidence.get('snapshot') == task.get('review_snapshot'))
 
@@ -878,6 +894,373 @@ def astra_resolution_evidence(args: argparse.Namespace, task: dict[str, Any]) ->
             'model':ROLE_MODELS['astra_consultant'],'director_decision':args.director_decision,
             'identity_is_manual_attestation':'true'}
 
+# Visual profiles extend the same manual ledger; they do not launch tools or models.
+VISUAL_PROFILES = {'visual-design', 'ux-ui', 'storyboard', 'motion-fx'}
+VISUAL_CAPABILITIES = {'reference_search', 'image_inspection', 'editable_export', 'preview_export',
+                       'custom_roles', 'image_generation', 'video_generation',
+                       'browser_interaction', 'temporal_inspection'}
+VISUAL_REASONS = {'initial', 'user-feedback', 'direction-change', 'capability-change',
+                  'qa-fix', 'scope-change', 'recovery'}
+
+
+def visual_digest(value: Any) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=True,
+                                     separators=(',', ':')).encode()).hexdigest()
+
+
+def visual_text(value: Any, name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise OrchestrationError(f'visual {name} must be a nonempty string')
+    return value
+
+
+def visual_object(value: Any, name: str) -> dict[str, Any]:
+    if not isinstance(value, dict): raise OrchestrationError(f'visual {name} must be an object')
+    return value
+
+
+def visual_list(value: Any, name: str) -> list[Any]:
+    if not isinstance(value, list) or not value: raise OrchestrationError(f'visual {name} must be a nonempty list')
+    return value
+
+
+def visual_json(path: str) -> dict[str, Any]:
+    try: value = json.loads(Path(path).read_text(encoding='utf-8'))
+    except (OSError, ValueError) as exc: raise OrchestrationError(f'cannot read visual JSON: {exc}') from exc
+    return visual_object(value, 'input')
+
+
+def visual_source(value: Any) -> dict[str, Any]:
+    evidence = visual_object(value, 'approval evidence')
+    if evidence.get('decision') != 'approved' or evidence.get('origin') != 'user':
+        raise OrchestrationError('explicit user approval required; agent approval or a PASS is insufficient')
+    for key in ('source', 'quote', 'approved_by'):
+        visual_text(evidence.get(key), f'approval {key}')
+    return evidence
+
+
+def visual_file(root: Path, value: Any) -> dict[str, Any]:
+    item = visual_object(value, 'artifact')
+    path = visual_text(item.get('path'), 'artifact path')
+    visual_text(item.get('format'), 'artifact format')
+    candidate = safe_contained_path(root, path)
+    if not candidate.is_file(): raise OrchestrationError(f'visual artifact missing: {path}')
+    # Snapshot bytes even for ignored outputs. No claim is made about their pixels.
+    record = dict(item)
+    record['path'] = candidate.relative_to(root).as_posix()
+    record['content'] = worktree_value(root, record['path'])
+    return record
+
+
+def visual_files_current(root: Path, items: list[dict[str, Any]]) -> None:
+    for item in items:
+        current = visual_file(root, item)
+        if current['content'] != item.get('content'):
+            raise OrchestrationError(f"visual artifact evidence is stale: {item['path']}")
+
+
+def visual_task(task: dict[str, Any]) -> dict[str, Any]:
+    if task.get('profile', 'code') not in VISUAL_PROFILES:
+        raise OrchestrationError('visual command requires a visual task profile')
+    if not isinstance(task.get('visual'), dict): raise OrchestrationError('visual spec is required')
+    return task['visual']
+
+
+def visual_binding(task: dict[str, Any]) -> dict[str, Any]:
+    v = visual_task(task)
+    return {'revision': v['revision'], 'spec_digest': visual_digest(v['spec']),
+            'contract_revision': task.get('contract_revision', 1)}
+
+
+def visual_signature(task: dict[str, Any]) -> Optional[str]:
+    if task.get('profile', 'code') not in VISUAL_PROFILES: return None
+    visual = task.get('visual') or {}
+    return visual_digest({key: visual.get(key) for key in ('revision', 'spec', 'boards', 'preflight', 'approvals', 'prototype', 'artifacts', 'qa')})
+
+
+def visual_current(root: Path, task: dict[str, Any]) -> dict[str, Any]:
+    v = visual_task(task)
+    visual_files_current(root, v['boards'])
+    return v
+
+
+def visual_required(task: dict[str, Any]) -> set[str]:
+    required = {'reference_search', 'image_inspection', 'editable_export', 'preview_export', 'custom_roles'}
+    if task['profile'] == 'ux-ui': required.add('browser_interaction')
+    if task['profile'] == 'motion-fx': required.add('temporal_inspection')
+    return required | set(visual_task(task)['spec'].get('required_capabilities', []))
+
+
+def visual_preflight(root: Path, task: dict[str, Any]) -> None:
+    v = visual_current(root, task)
+    record = v.get('preflight') or {}
+    if record.get('binding') != visual_binding(task): raise OrchestrationError('current visual capability preflight required')
+    missing = [name for name in sorted(visual_required(task))
+               if record.get('capabilities', {}).get(name, {}).get('status') != 'available']
+    if missing: raise OrchestrationError('visual capability blockers: ' + ', '.join(missing))
+
+
+def visual_approval(root: Path, task: dict[str, Any], target: str) -> dict[str, Any]:
+    v = visual_current(root, task)
+    record = v.get('approvals', {}).get(target) or {}
+    if record.get('binding') != visual_binding(task): raise OrchestrationError(f'current user {target} approval required')
+    visual_source(record)
+    if target == 'prototype':
+        visual_files_current(root, v.get('prototype', []))
+        if not v.get('prototype') or record.get('artifact_digest') != visual_digest(v['prototype']):
+            raise OrchestrationError('prototype approval is stale')
+        if record.get('direction_digest') != visual_digest(v['approvals'].get('direction')):
+            raise OrchestrationError('prototype approval belongs to another direction')
+    return record
+
+
+def require_visual_production(root: Path, task: dict[str, Any]) -> None:
+    if task.get('profile', 'code') not in VISUAL_PROFILES: return
+    visual_preflight(root, task)
+    visual_approval(root, task, 'direction'); visual_approval(root, task, 'prototype')
+    if visual_task(task)['stage'] not in {'production', 'qa', 'delivery'}:
+        raise OrchestrationError('explicit visual-production transition required before production/submission')
+
+
+def require_visual_qa(root: Path, task: dict[str, Any]) -> None:
+    if task.get('profile', 'code') not in VISUAL_PROFILES: return
+    require_visual_production(root, task)
+    v = visual_task(task)
+    if not v.get('artifacts'): raise OrchestrationError('editable sources, preview, and report required')
+    visual_files_current(root, v['artifacts'])
+    qa = v.get('qa') or {}
+    if (qa.get('binding') != visual_binding(task) or qa.get('result') != 'pass'
+            or qa.get('artifact_digest') != visual_digest(v['artifacts'])
+            or qa.get('direction_digest') != visual_digest(v['approvals'])
+            or qa.get('owner_history_digest') != owner_history_digest(task)
+            or qa.get('attempt') != task.get('attempt', 0)):
+        raise OrchestrationError('current independent visual QA required; text PASS is insufficient')
+    if qa.get('reviewer') in set(task.get('owner_history', [])) | {task.get('created_by')}:
+        raise OrchestrationError('visual QA reviewer must be independent of authors and director')
+
+
+def visual_event(v: dict[str, Any], event: str, reason: str, **details: Any) -> None:
+    v.setdefault('events', []).append({'event': event, 'stage': v['stage'], 'revision': v['revision'],
+                                      'reason': reason, 'time': time.time(), **details})
+
+
+def validate_visual_spec(root: Path, profile: str, spec: dict[str, Any]) -> list[dict[str, Any]]:
+    brief = visual_object(spec.get('brief'), 'brief')
+    for key in ('idea', 'audience'): visual_text(brief.get(key), f'brief {key}')
+    for item in visual_list(brief.get('constraints'), 'constraints'): visual_text(item, 'constraint')
+    refs = visual_list(spec.get('references'), 'references')
+    ids = set()
+    for raw in refs:
+        ref = visual_object(raw, 'reference')
+        rid = visual_text(ref.get('id'), 'reference id')
+        if rid in ids: raise OrchestrationError('duplicate visual reference id')
+        ids.add(rid)
+        for key in ('url', 'take', 'avoid', 'inspection_source'): visual_text(ref.get(key), f'reference {key}')
+        if not re.match(r'^https?://[^/\s]+(?:/|$)', ref['url']): raise OrchestrationError('reference needs an HTTP(S) source link')
+    existing = spec.get('existing_style')
+    if existing is not None:
+        visual_object(existing, 'existing style')
+        for key in ('source', 'version', 'scope'): visual_text(existing.get(key), f'existing style {key}')
+        visual_source(existing.get('approval'))
+    if 'scope_reduction' in spec:
+        reduction = visual_object(spec['scope_reduction'], 'scope reduction')
+        visual_text(reduction.get('description'), 'scope reduction description'); visual_source(reduction.get('approval'))
+    directions = visual_list(spec.get('directions'), 'directions')
+    if not (len(directions) == 1 if existing else 2 <= len(directions) <= 3):
+        raise OrchestrationError('provide 2–3 coherent directions, or one explicitly approved existing style')
+    boards = []; direction_ids = set()
+    for raw in directions:
+        direction = visual_object(raw, 'direction'); did = visual_text(direction.get('id'), 'direction id')
+        if did in direction_ids: raise OrchestrationError('duplicate direction id')
+        direction_ids.add(did); visual_text(direction.get('summary'), 'direction summary')
+        palette = visual_list(direction.get('palette'), 'palette')
+        if any(not isinstance(x, str) or not re.fullmatch(r'#[0-9a-fA-F]{6}', x) for x in palette):
+            raise OrchestrationError('palette colors must be #RRGGBB')
+        uses = visual_list(direction.get('reference_ids'), 'direction references')
+        if any(not isinstance(x, str) or x not in ids for x in uses): raise OrchestrationError('direction references an unknown source')
+        boards.append(visual_file(root, direction.get('board')))
+        if profile == 'motion-fx':
+            motion = visual_list(direction.get('motion_reference_ids'), 'motion examples')
+            if any(not isinstance(x, str) or x not in ids or not any(r['id'] == x and r.get('kind') == 'motion' for r in refs) for x in motion):
+                raise OrchestrationError('motion directions require motion reference links')
+    deliverables = visual_object(spec.get('deliverables'), 'deliverables')
+    for key in ('editable', 'preview', 'report'):
+        for value in visual_list(deliverables.get(key), f'{key} formats'): visual_text(value, 'format')
+    required = spec.get('required_capabilities', [])
+    if not isinstance(required, list) or any(not isinstance(x, str) or not x.strip() for x in required):
+        raise OrchestrationError('required_capabilities must be a list of capability names')
+    return boards
+
+
+def cmd_visual(a: argparse.Namespace, root: Path) -> None:
+    with locked(root):
+        db = load(root); t = get_task(db, a.id)
+        if t.get('profile', 'code') not in VISUAL_PROFILES: raise OrchestrationError('visual task profile required')
+        if a.cmd == 'visual-status':
+            print(json.dumps({'profile': t['profile'], 'visual': t.get('visual'),
+                              'evidence_mode': 'manual_declaration_not_tool_execution'}, ensure_ascii=True, indent=2)); return
+        visual_text(a.actor, 'actor identity')
+        if t['state'] in {'completed', 'integrated', 'interrupted'}: raise OrchestrationError('visual changes require an active or planned task; recover/reopen first')
+        data = visual_json(a.file) if hasattr(a, 'file') else None
+        if a.cmd in {'visual-spec', 'visual-preflight', 'visual-approve', 'visual-production'} and a.actor != t['created_by']:
+            raise OrchestrationError('only the task director records visual contracts, preflight, approvals, and production')
+        if a.cmd == 'visual-spec':
+            if t['state'] not in {'planned', 'in_progress', 'blocked'}: raise OrchestrationError('visual spec changes require planned, in_progress, or blocked task')
+            boards = validate_visual_spec(root, t['profile'], data)
+            old = t.get('visual', {}); revision = old.get('revision', 0) + 1
+            previous = old.get('spec', {})
+            removed = set(previous.get('required_capabilities', [])) - set(data.get('required_capabilities', []))
+            for role in ('editable', 'preview', 'report'):
+                removed |= {role + ':' + value for value in set(previous.get('deliverables', {}).get(role, [])) - set(data['deliverables'][role])}
+            if removed:
+                reduction = visual_object(data.get('scope_reduction'), 'scope reduction for removed capabilities/formats')
+                visual_source(reduction.get('approval'))
+                declared_removed = visual_list(reduction.get('removed'), 'scope reduction removed items')
+                for item in declared_removed: visual_text(item, 'scope reduction removed item')
+                if sorted(declared_removed) != sorted(removed):
+                    raise OrchestrationError('scope reduction must explicitly list every removed capability/role:format')
+            v = {'revision': revision, 'spec': data, 'boards': boards, 'stage': 'directions',
+                 'approvals': {}, 'events': old.get('events', []),
+                 'spec_history': old.get('spec_history', []) + ([{'revision': old['revision'], 'spec': old['spec']}] if old else [])}
+            t['visual'] = v
+            visual_event(v, 'spec_recorded', a.reason)
+        else:
+            v = visual_current(root, t)
+            if a.cmd == 'visual-preflight':
+                capabilities = visual_object(data.get('capabilities'), 'capabilities')
+                for name in VISUAL_CAPABILITIES | visual_required(t):
+                    entry = visual_object(capabilities.get(name), f'capability {name}')
+                    if entry.get('status') not in ('available', 'unavailable'): raise OrchestrationError('capability status must be available or unavailable')
+                    visual_text(entry.get('evidence'), 'capability observed evidence')
+                    if entry['status'] == 'available':
+                        visual_text(entry.get('tool'), 'available capability tool'); visual_text(entry.get('source'), 'capability observation source')
+                v['preflight'] = {'binding': visual_binding(t), 'capabilities': capabilities,
+                                  'evidence_mode': 'manual_declaration_not_tool_execution'}
+                v.pop('qa', None)
+                visual_event(v, 'preflight_recorded', a.reason)
+            elif a.cmd == 'visual-approve':
+                visual_preflight(root, t); approval = dict(visual_source(data))
+                if type(data.get('revision')) is not int or data['revision'] != v['revision']:
+                    raise OrchestrationError('approval must explicitly name the current visual revision')
+                if a.target == 'direction':
+                    direction = next((d for d in v['spec']['directions'] if d['id'] == data.get('direction_id')), None)
+                    if not direction or data.get('palette') != direction['palette']:
+                        raise OrchestrationError('approval must explicitly select a current direction and exact palette')
+                    if v.get('approvals', {}).get('direction'):
+                        raise OrchestrationError('direction already approved; revise the spec for a direction/palette change')
+                    v['stage'] = 'prototype'
+                else:
+                    visual_approval(root, t, 'direction')
+                    if not v.get('prototype'): raise OrchestrationError('register a rendered prototype before approving it')
+                    visual_files_current(root, v['prototype'])
+                    if data.get('artifact_digest') != visual_digest(v['prototype']): raise OrchestrationError('approval must name the current prototype artifact_digest from visual-status')
+                    approval['artifact_digest'] = visual_digest(v['prototype'])
+                    approval['direction_digest'] = visual_digest(v['approvals']['direction'])
+                approval.update({'binding': visual_binding(t), 'recorded_by': a.actor,
+                                 'evidence_mode': 'manual_user_source_record_not_authentication'})
+                v['approvals'][a.target] = approval; v.pop('qa', None)
+                visual_event(v, a.target + '_approved', a.reason)
+            elif a.cmd == 'visual-artifacts':
+                owner(t, a.actor)
+                if t['state'] != 'in_progress': raise OrchestrationError('artifact registration requires an in_progress owner')
+                visual_preflight(root, t); visual_approval(root, t, 'direction')
+                if a.target == 'final': require_visual_production(root, t)
+                elif v['stage'] != 'prototype': raise OrchestrationError('prototype changes require a revised spec before production')
+                artifacts = [visual_file(root, item) for item in visual_list(data.get('artifacts'), 'artifacts')]
+                if len({x['path'] for x in artifacts}) != len(artifacts): raise OrchestrationError('duplicate artifact paths')
+                previews = [x for x in artifacts if x.get('role') == 'preview']
+                if not previews: raise OrchestrationError('rendered preview required')
+                for item in artifacts:
+                    if item.get('role') not in ('editable', 'preview', 'report'): raise OrchestrationError('invalid artifact role')
+                if t['profile'] == 'motion-fx':
+                    for item in previews:
+                        duration = item.get('duration_seconds')
+                        if item.get('kind') != 'video' or item.get('format') not in ('mp4','webm','mov','gif') or Path(item['path']).suffix.lower() != '.' + item['format'] or type(duration) not in (int, float) or not (0 < duration < float('inf')):
+                            raise OrchestrationError('motion preview needs a video format/path (mp4/webm/mov/gif) and finite positive duration_seconds; still frames are insufficient')
+                if a.target == 'final':
+                    for role, formats in v['spec']['deliverables'].items():
+                        if role not in {'editable', 'preview', 'report'}: continue
+                        if not set(formats).issubset({x['format'] for x in artifacts if x.get('role') == role}):
+                            raise OrchestrationError(f'all promised {role} formats required')
+                    v['artifacts'] = artifacts; v['stage'] = 'production'
+                else:
+                    v['prototype'] = artifacts; v['prototype_digest'] = visual_digest(artifacts)
+                    v['approvals'].pop('prototype', None)
+                v.pop('qa', None); visual_event(v, a.target + '_registered', a.reason)
+            elif a.cmd == 'visual-production':
+                if t['state'] != 'in_progress': raise OrchestrationError('production requires an in_progress owner')
+                visual_preflight(root, t); visual_approval(root, t, 'direction'); visual_approval(root, t, 'prototype')
+                if v['stage'] != 'prototype': raise OrchestrationError('production can only start after prototype approval')
+                v['stage'] = 'production'; visual_event(v, 'production_started', a.reason)
+            elif a.cmd == 'visual-qa':
+                if t['state'] != 'ready_for_review': raise OrchestrationError('submit the final artifacts before visual QA')
+                require_visual_production(root, t); visual_files_current(root, v.get('artifacts', []))
+                qa = dict(data)
+                visual_text(qa.get('reviewer'), 'QA reviewer identity')
+                if qa.get('reviewer') != a.actor or a.actor in set(t.get('owner_history', [])) | {t['created_by']}:
+                    raise OrchestrationError('visual reviewer must be independent of authors and director')
+                if qa.get('result') not in ('pass', 'fail', 'inconclusive'): raise OrchestrationError('visual QA needs pass, fail, or inconclusive')
+                visual_text(qa.get('findings'), 'QA findings')
+                if qa['result'] == 'pass':
+                    if qa.get('unrun') != []: raise OrchestrationError('visual PASS requires explicit empty unrun list')
+                    opened = visual_list(qa.get('opened'), 'opened render evidence')
+                    for preview in [x for x in v.get('artifacts', []) if x['role'] == 'preview']:
+                        observation = next((x for x in opened if isinstance(x, dict) and x.get('path') == preview['path']), None)
+                        if not observation or observation.get('content') != preview['content']:
+                            raise OrchestrationError('QA must identify every current rendered preview and content fingerprint')
+                        for key in ('tool', 'source', 'observation'): visual_text(observation.get(key), f'opened render {key}')
+                        if t['profile'] == 'motion-fx':
+                            if observation.get('mode') != 'playback' or type(observation.get('start_seconds')) not in (int, float) or observation['start_seconds'] != 0 or type(observation.get('end_seconds')) not in (int, float) or observation['end_seconds'] != preview['duration_seconds']:
+                                raise OrchestrationError('motion QA requires full-duration temporal playback evidence; static frames are insufficient')
+                    required = {'visual', 'palette', 'references', 'editable_source'}
+                    if t['profile'] == 'ux-ui': required |= {'interactions', 'responsive', 'accessibility'}
+                    if t['profile'] == 'storyboard': required |= {'sequence', 'continuity'}
+                    if t['profile'] == 'motion-fx': required |= {'timing', 'transitions', 'continuity'}
+                    checks = visual_object(qa.get('checks'), 'QA checks')
+                    if not required.issubset(checks): raise OrchestrationError('missing required visual QA checks: ' + ', '.join(sorted(required-set(checks))))
+                    for name, raw_check in checks.items():
+                        check = visual_object(raw_check, f'QA {name}')
+                        if check.get('result') != 'pass': raise OrchestrationError(f'visual QA check {name} is not passed')
+                        for key in ('evidence', 'tool', 'source'): visual_text(check.get(key), f'QA {name} {key}')
+                qa.update({'binding': visual_binding(t), 'artifact_digest': visual_digest(v.get('artifacts')),
+                           'direction_digest': visual_digest(v['approvals']), 'owner_history_digest': owner_history_digest(t),
+                           'attempt': t.get('attempt', 0), 'evidence_mode': 'manual_observation_record_not_tool_execution'})
+                v['qa'] = qa; visual_event(v, 'qa_recorded', a.reason, result=qa['result'])
+        log(db, t, a.cmd.replace('-', '_'), a.actor, revision=v['revision'], reason=a.reason)
+        save(root, db)
+        print(json.dumps({'revision': v['revision'], 'stage': v['stage'],
+                          'prototype_digest': v.get('prototype_digest'),
+                          'blockers': sorted(name for name in visual_required(t) if v.get('preflight', {}).get('capabilities', {}).get(name, {}).get('status') != 'available'),
+                          'evidence_mode': 'manual_declaration_not_tool_execution'}))
+
+
+def visual_statistics(db: dict[str, Any]) -> dict[str, Any]:
+    # Export categories/counters only; user quotes, paths, sources and findings stay local.
+    events = []; profiles = {}; counts = {}; reasons = {}; qa_results = {}
+    allowed_events = {'spec_recorded','preflight_recorded','direction_approved','prototype_approved','prototype_registered','final_registered','production_started','qa_recorded','delivered'}
+    for task in db['tasks'].values():
+        if task.get('profile', 'code') not in VISUAL_PROFILES: continue
+        profiles[task['profile']] = profiles.get(task['profile'], 0) + 1
+        for event in task.get('visual', {}).get('events', []):
+            if not isinstance(event,dict): raise OrchestrationError('invalid visual statistics event')
+            def category(key, allowed):
+                value=event.get(key)
+                return value if isinstance(value,str) and value in allowed else None
+            row={'task_ref': _ref(task['id'], 'orchestrator.stats.v1.task'),
+                 'event':category('event',allowed_events),
+                 'stage':category('stage',{'directions','prototype','production','qa','delivery'}),
+                 'reason':category('reason',VISUAL_REASONS),
+                 'result':category('result',{'pass','fail','inconclusive'}),
+                 'revision':event.get('revision') if type(event.get('revision')) is int and event['revision']>0 else None}
+            events.append(row)
+            if row['event']: counts[row['event']]=counts.get(row['event'],0)+1
+            if row['reason']: reasons[row['reason']]=reasons.get(row['reason'],0)+1
+            if row['result']: qa_results[row['result']]=qa_results.get(row['result'],0)+1
+    return {'evidence_source': 'manual_ledger_records', 'profiles': profiles, 'events': events,
+            'summary': {'events_by_type': counts, 'revision_reasons': reasons, 'qa_results': qa_results},
+            'observed_tokens': None, 'observed_model': None, 'observed_cost': None}
+
+
 def parser() -> argparse.ArgumentParser:
     p=argparse.ArgumentParser(description=__doc__ + ' Actor IDs and fresh-context/stop declarations are manual bookkeeping, not authentication or proof that an agent process stopped.')
     p.add_argument('--project',default='.',help='project directory (default: cwd)'); p.add_argument('--data-dir',help='bound project-contained ledger directory'); s=p.add_subparsers(dest='cmd',required=True)
@@ -885,6 +1268,7 @@ def parser() -> argparse.ArgumentParser:
     q=s.add_parser('init'); q.add_argument('--max-workers',type=int,default=3); q.add_argument('--review-round-limit',type=int,default=2); q.add_argument('--consultation-limit',type=int,default=1); q.add_argument('--escalation-limit',type=int,default=1)
     q=s.add_parser('add'); q.add_argument('id'); q.add_argument('--goal',required=True); q.add_argument('--depends-on',default=''); q.add_argument('--priority',type=int,default=50); q.add_argument('--risk',choices=['low','medium','high','critical'],default='medium'); q.add_argument('--scope',required=True,help='comma-separated paths/resources; * means shared'); q.add_argument('--acceptance',required=True); q.add_argument('--actor',required=True)
     q.add_argument('--review-mode',choices=['planned','manual-control'],default='planned',help='manual-control is an explicit low-risk opt-out from the acceptance-plan gate')
+    q.add_argument('--profile', choices=['code', *sorted(VISUAL_PROFILES)], default='code')
     s.add_parser('list')
     q=s.add_parser('plan-review'); q.add_argument('id'); q.add_argument('--actor',required=True,help='manual actor ID; not authentication'); q.add_argument('--director',required=True); q.add_argument('--reviewer',required=True); q.add_argument('--reviewer-role',choices=sorted(ROLE_DEFAULTS)); q.add_argument('--contract-version',required=True); q.add_argument('--scenario',action='append',required=True); q.add_argument('--fresh-context-attested',action='store_true',help='manual declaration, not authentication; requires all four context items'); q.add_argument('--context-item',action='append',default=[],choices=sorted(PLAN_CONTEXT_ITEMS),help='manual fresh-context checklist item, not proof of a new reviewer context')
     q=s.add_parser('assign'); q.add_argument('id'); q.add_argument('--owner',required=True); q.add_argument('--actor',required=True); q.add_argument('--owner-role',choices=sorted(ROLE_DEFAULTS))
@@ -899,6 +1283,15 @@ def parser() -> argparse.ArgumentParser:
     q=s.add_parser('complete'); q.add_argument('id'); q.add_argument('--actor',required=True); q.add_argument('--check',action='append',default=[])
     q=s.add_parser('snapshot'); q.add_argument('--json',action='store_true')
     q=s.add_parser('stats',help='export privacy-filtered ledger statistics'); q.add_argument('--format',choices=['json','csv'],default='json')
+    for cmd in ('visual-spec','visual-preflight','visual-approve','visual-artifacts','visual-production','visual-qa','visual-status'):
+        q=s.add_parser(cmd,help='record visual workflow evidence; does not execute tools or authenticate identities')
+        q.add_argument('id')
+        if cmd != 'visual-status':
+            q.add_argument('--actor',required=True)
+            q.add_argument('--reason',choices=sorted(VISUAL_REASONS),default='initial')
+        if cmd not in {'visual-production','visual-status'}: q.add_argument('--file',required=True,help='structured JSON evidence file')
+        if cmd == 'visual-approve': q.add_argument('--target',choices=['direction','prototype'],required=True)
+        if cmd == 'visual-artifacts': q.add_argument('--target',choices=['prototype','final'],required=True)
     return p
 
 def main(argv: Optional[list[str]]=None) -> int:
@@ -913,6 +1306,7 @@ def main(argv: Optional[list[str]]=None) -> int:
         elif a.cmd=='snapshot':
             snap=snapshot(root); print(json.dumps(snap,ensure_ascii=True) if a.json else f"{snap['fingerprint']}\tHEAD={snap['head']}\tchanged={','.join(snap['paths']) or '(clean)'}")
         elif a.cmd=='stats': cmd_stats(a,root)
+        elif a.cmd.startswith('visual-'): cmd_visual(a,root)
         elif a.cmd=='add': cmd_add(a,root)
         elif a.cmd=='list': cmd_list(a,root)
         elif a.cmd=='plan-review': cmd_plan_review(a,root)
