@@ -1,6 +1,6 @@
 # Install
 
-For a stable version, download and extract the complete ZIP package from the [v0.2.0 release](https://github.com/zager-dk/sol-deepseek-project-orchestrator/releases/tag/v0.2.0). Run the commands below from the extracted package directory. The archive contains the offline installer and all its supporting files; it does not include credentials or a configured Codex home.
+This checkout contains repository/installed skill version **0.3.0**, recorded in `skill/VERSION`. Run the commands below from the complete checkout directory with the offline installer and all supporting files. Published packages, when available, are listed under [Releases](https://github.com/zager-dk/sol-deepseek-project-orchestrator/releases); no v0.3.0 release archive is assumed.
 
 The installer is standard-library Python. The CLI targets Python 3.9+ and requires a Git working tree with an existing commit for snapshots; this environment verified it with Python 3.10.6. It copies the skill, its bundled local Python ledger CLI, six native child-role definitions, and the separate primary-session profile to explicit destinations. The Python ledger CLI records transitions; the Codex CLI (`codex`) starts model sessions. Optional hooks are project-local. It does not access the network, invoke models, install into a guessed Codex home, or edit `config.toml`.
 

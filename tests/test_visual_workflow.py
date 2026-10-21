@@ -88,6 +88,7 @@ class VisualWorkflowTests(unittest.TestCase):
         self.direction_approval()
         self.record('visual-artifacts', {'artifacts': [self.preview('prototype.svg')]}, '--target', 'prototype', actor='worker')
         self.record('visual-approve', {**self.approval, 'revision': self.task()['visual']['revision'],
+            'finished_slice': {k:{'result':'pass','tool':'fixture','source':'synthetic','observation':'Synthetic actual observation'} for k in ('keyframe','reference_comparison','main_flow')},
             'artifact_digest': self.task()['visual']['prototype_digest']}, '--target', 'prototype')
 
     def production(self, profile='visual-design'):
@@ -276,7 +277,8 @@ class VisualWorkflowTests(unittest.TestCase):
         self.production()
         self.cli('review', 'A', '--reviewer', 'reviewer', '--result', 'inconclusive', '--findings', 'scope unclear', *CONTEXT)
         self.cli('replan', 'A', '--actor', 'director', '--director', 'director', '--reason', 'scope-change', '--acceptance', 'new acceptance')
-        self.record('visual-approve', {**self.approval, 'revision': 1, 'artifact_digest': self.task()['visual']['prototype_digest']}, '--target', 'prototype', ok=False)
+        self.record('visual-approve', {**self.approval, 'revision': 1, 'finished_slice': {k:{'result':'pass','tool':'fixture','source':'synthetic','observation':'Synthetic actual observation'} for k in ('keyframe','reference_comparison','main_flow')},
+            'artifact_digest': self.task()['visual']['prototype_digest']}, '--target', 'prototype', ok=False)
 
     def test_statistics_export_categories_not_private_evidence(self):
         self.production(); self.record('visual-qa', self.qa(), '--reason', 'qa-fix', actor='reviewer')

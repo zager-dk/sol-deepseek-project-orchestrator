@@ -55,7 +55,7 @@ EVENT_STATE_PAIRS = {
     'recovered': {('interrupted','assigned')},
     'escalated': {('in_progress','assigned'),('ready_for_review','assigned')},
     'review_pass': {('ready_for_review','ready_for_review')},
-    'review_fail': {('ready_for_review','in_progress')},
+    'review_fail': {('ready_for_review','in_progress'),('ready_for_review','blocked')},
     'review_inconclusive': {('ready_for_review','blocked')},
     'integrated': {('ready_for_review','integrated')},
     'completed': {('integrated','completed')},
@@ -532,7 +532,7 @@ def stats_report(db: dict[str, Any]) -> dict[str, Any]:
         bytype[e['event']]=bytype.get(e['event'],0)+1
         role=e['requested_role'] or 'unknown'; byrole[role]=byrole.get(role,0)+1
         attempts[e['task_ref']]=max(attempts.get(e['task_ref'],0),e['attempt'])
-    return {'schema':1,'coverage':stats['coverage'],'clock_source':'system_wall_clock_utc','events':events,'summary':{'event_count':len(events),'task_count':len(attempts),'events_by_type':bytype,'events_by_role':byrole,'attempts_by_task':attempts},'visual':visual_statistics(db)}
+    return {'schema':1,'coverage':stats['coverage'],'clock_source':'system_wall_clock_utc','events':events,'summary':{'event_count':len(events),'task_count':len(attempts),'events_by_type':bytype,'events_by_role':byrole,'attempts_by_task':attempts},'visual':visual_statistics(db),'delivery_timing':{_ref(t['id'], 'orchestrator.stats.v1.task'):task_timing(t) for t in db['tasks'].values()}}
 
 def cmd_stats(a: argparse.Namespace, root: Path) -> None:
     path=codex_dir(root)/DB_REL.name
@@ -628,6 +628,8 @@ def cmd_add(a: argparse.Namespace, root: Path) -> None:
         if a.profile != 'code' and a.review_mode == 'manual-control': raise OrchestrationError('visual profiles require independent acceptance planning')
         if a.review_mode == 'manual-control' and a.risk != 'low': raise OrchestrationError('manual review control opt-out is limited to low-risk tasks')
         task={'id':a.id,'profile':a.profile,'goal':a.goal,'depends_on':deps,'priority':a.priority,'risk':a.risk,'scope':normalize_scope(a.scope,root), 'acceptance':a.acceptance,'contract_revision':1,'review_mode':a.review_mode,'acceptance_plans':[],'owner':None,'owner_history':[],'attempt':0,'state':'planned','review_rounds':0,'consultations':0,'evidence':[],'snapshot':None,'created_by':a.actor,'created_at':time.time()}
+        task['approval_mode']=a.approval_mode
+        if a.readiness: task['readiness']=readiness_contract(visual_json(a.readiness))
         db['tasks'][a.id]=task; log(db,task,'created',a.actor); save(root,db)
     print(a.id)
 
@@ -663,6 +665,7 @@ def cmd_state(a: argparse.Namespace, root: Path, target: str) -> None:
             visual_files_current(root,visual_task(t)['artifacts'])
             visual_task(t)['stage']='qa'
         prior=t['state']; transition(t,target)
+        if target == 'ready_for_review': t.setdefault('first_submitted_at',time.time()); t['last_submitted_at']=time.time()
         if target == 'in_progress':
             t['attempt'] = int(t.get('attempt', 0)) + 1
             t.pop('review_snapshot', None)
@@ -675,6 +678,10 @@ def cmd_replan(a: argparse.Namespace, root: Path) -> None:
         if a.actor != a.director: raise OrchestrationError('only the director may re-plan a task')
         if t['state'] not in {'planned', 'blocked'}:
             raise OrchestrationError('replan requires planned or blocked state with no active worker reservation; interrupt and recover a running worker first')
+        if t.get('diagnosis_required'):
+            if not a.diagnosis or not a.changed_approach: raise OrchestrationError('repeated criterion failure requires diagnosis and changed approach')
+            t.setdefault('diagnoses',[]).append({'cause':a.diagnosis,'changed_approach':a.changed_approach,'time':time.time()})
+            t['diagnosis_required']=False
         prior=t['state']; t['state']='planned'; t['owner']=None; t['director_resolution']=a.reason
         changed={}
         if a.goal is not None: changed['goal']={'old':t['goal'],'new':a.goal}; t['goal']=a.goal
@@ -765,20 +772,32 @@ def cmd_review(a: argparse.Namespace, root: Path) -> None:
         require_acceptance_plan(t)
         if not a.fresh_context_attested or not PLAN_CONTEXT_ITEMS.issubset(set(a.context_item)):
             raise OrchestrationError('fresh-context manual attestation must include contract, diff, relevant-code, and verification-results; actor IDs and attestations are not authentication')
+        if a.reviewer == t['created_by']: raise OrchestrationError('reviewer must be independent of director claims')
         if a.reviewer in set(t.get('owner_history', [t['owner']])): raise OrchestrationError('reviewer must be distinct from every task author')
         if t['review_rounds']>=db['config']['review_round_limit'] + t.get('escalations',0): raise OrchestrationError('review round allowance reached; director must re-evaluate or create a follow-up task')
+        if a.result == 'pass' and a.unrun: raise OrchestrationError('unrun checks are NOT VERIFIED; pass refused')
         if a.result == 'pass' and (not a.check or any(not check_passed(c) for c in a.check)):
             raise OrchestrationError('pass requires each --check as PASS; command=...; result=exit 0|passed; evidence=...')
-        if a.result == 'pass': require_visual_qa(root,t)
+        if a.result == 'pass':
+            require_visual_qa(root,t)
+            if t.get('readiness'):
+                if not a.readiness_evidence: raise OrchestrationError('readiness evidence required')
+                require_readiness(t, visual_json(a.readiness_evidence), a.reviewer, snapshot(root))
         senior_evidence=senior_role_evidence(a, t)
         astra_resolution=astra_resolution_evidence(a,t)
         review_from_state=t['state']; review_snapshot=snapshot(root)
         evidence={'visual_signature':visual_signature(t),'reviewer':a.reviewer,'result':a.result,'checks':a.check,'unrun':a.unrun,'findings':a.findings,'senior_verifier':senior_evidence,'astra_resolution':astra_resolution,'fresh_context':{'attested':True,'items':sorted(set(a.context_item)),'identity_is_manual_attestation':True},'contract_revision':t.get('contract_revision',1),'attempt':t.get('attempt',0),'owner_history_digest':owner_history_digest(t),'time':time.time(),'snapshot':review_snapshot}
+        if a.result != 'pass' and a.readiness_evidence:
+            require_readiness(t, visual_json(a.readiness_evidence), a.reviewer, review_snapshot, allow_unverified=True)
+        if a.result == 'fail' and t.get('readiness') and not a.defects: raise OrchestrationError('failed readiness review requires unified defects')
+        if a.defects:
+            record_defects(t, defect_json(a.defects))
         t['review_rounds']+=1; t['evidence'].append(evidence); t['review_snapshot']=review_snapshot
         if a.result=='pass':
+            if any(d['status'] != 'fixed' for d in current_defects(t)): raise OrchestrationError('unresolved defects prevent PASS')
             if t['risk'] in {'high','critical'} and not (a.senior_verified or astra_resolution): raise OrchestrationError('high risk needs canonical read-only Sol reviewer verification or recorded canonical Astra consultation with director resolution')
         else:
-            target='in_progress' if a.result=='fail' else 'blocked'
+            target='in_progress' if a.result=='fail' and not t.get('diagnosis_required') else 'blocked'
             transition(t,target)
             if t.get('visual') and a.result=='fail': t['visual']['stage']='production'
         log(db,t,'review_'+a.result,a.reviewer,checks=a.check,unrun=a.unrun,findings=a.findings,reviewer_role=a.reviewer_role,reviewer=a.reviewer,_stats_from_state=review_from_state); save(root,db)
@@ -790,7 +809,7 @@ def cmd_integrate(a: argparse.Namespace, root: Path) -> None:
         require_acceptance_plan(t)
         require_visual_qa(root,t)
         reviewer=t['evidence'][-1]['reviewer']
-        if reviewer in set(t.get('owner_history', [])):
+        if reviewer in set(t.get('owner_history', [])) | {t['created_by']}:
             raise OrchestrationError('recorded reviewer is no longer independent of every task author')
         senior_evidence=senior_role_evidence(a, t)
         astra_used=astra_resolution_evidence(a,t)
@@ -805,8 +824,9 @@ def cmd_complete(a: argparse.Namespace, root: Path) -> None:
     with locked(root):
         db=load(root); t=get_task(db,a.id)
         if t['state']!='integrated': raise OrchestrationError('task must be integrated first')
+        if any(d['status'] != 'fixed' for d in current_defects(t)): raise OrchestrationError('unresolved defects prevent completion')
         if not t.get('evidence') or not current_review(t): raise OrchestrationError('current passing review evidence is required at completion')
-        if t['evidence'][-1]['reviewer'] in set(t.get('owner_history', [])):
+        if t['evidence'][-1]['reviewer'] in set(t.get('owner_history', [])) | {t['created_by']}:
             raise OrchestrationError('recorded reviewer is no longer independent of every task author')
         require_visual_qa(root,t)
         if snapshot(root)!=t['integrated_snapshot']: raise OrchestrationError('integrated snapshot is stale; completion refused')
@@ -930,6 +950,149 @@ def visual_json(path: str) -> dict[str, Any]:
     return visual_object(value, 'input')
 
 
+def readiness_contract(value: Any) -> dict[str, Any]:
+    contract = visual_object(value, 'readiness contract')
+    for key in ('functional', 'user'):
+        for criterion in visual_list(contract.get(key), key + ' criteria'): visual_text(criterion, key)
+    for key in ('visual', 'audio', 'performance', 'device'):
+        entry = visual_object(contract.get(key), key)
+        if type(entry.get('relevant')) is not bool: raise OrchestrationError(key + ' needs relevant boolean')
+        visual_text(entry.get('criteria') if entry['relevant'] else entry.get('reason'), key + ' criteria/reason')
+    visual_text(contract.get('target'), 'target device/environment')
+    visual_list(contract.get('checks'), 'planned checks')
+    if 'launch' in contract:
+        launch=visual_object(contract['launch'], 'launch instructions')
+        if launch.get('status') == 'available':
+            for step in visual_list(launch.get('instructions'), 'launch instructions'): visual_text(step, 'launch instruction')
+        elif launch.get('status') == 'unavailable': visual_text(launch.get('reason'), 'launch unavailable reason')
+        else: raise OrchestrationError('launch status must be available or unavailable')
+    return contract
+
+
+def require_readiness(task, evidence, reviewer, current, allow_unverified=False):
+    if evidence.get('reviewer') != reviewer or reviewer in set(task.get('owner_history', [])) | {task['created_by']}:
+        raise OrchestrationError('readiness evidence needs an independent reviewer')
+    if evidence.get('snapshot') != current['fingerprint'] or evidence.get('contract_revision') != task['contract_revision'] or evidence.get('attempt') != task['attempt']:
+        raise OrchestrationError('readiness evidence is stale')
+    checks = visual_object(evidence.get('checks'), 'readiness checks')
+    if set(checks) != {'functional','user','visual','audio','performance','device'}:
+        raise OrchestrationError('readiness checks must contain exactly the six declared categories; unknown checks are not accepted')
+    for name in ('functional', 'user', 'visual', 'audio', 'performance', 'device'):
+        check = visual_object(checks.get(name), name + ' check')
+        relevant = name in ('functional', 'user') or task['readiness'][name]['relevant']
+        expected = 'pass' if relevant else 'not_applicable'
+        if relevant and allow_unverified and check.get('result') in ('not_verified','fail'):
+            visual_text(check.get('reason'), name + ' unavailable/failure reason')
+            continue
+        if check.get('result') != expected:
+            raise OrchestrationError(name + ' is NOT VERIFIED; record unavailable reason, never claim a pass')
+        for key in (('tool','source','observation') if relevant else ('reason',)):
+            visual_text(check.get(key), name + ' ' + key)
+    task['readiness_evidence'] = dict(evidence, owner_history_digest=owner_history_digest(task))
+
+
+def require_slice(task, selection):
+    early = visual_object(selection.get('finished_slice'), 'early finished slice')
+    required = ['keyframe','reference_comparison']
+    if task['profile'] == 'ux-ui': required.append('main_flow')
+    if task.get('readiness',{}).get('audio',{}).get('relevant'): required.append('audio')
+    for name in required:
+        check=visual_object(early.get(name),name + ' observation')
+        if check.get('result') != 'pass':
+            visual_text(check.get('reason'),name + ' NOT VERIFIED reason')
+            raise OrchestrationError(name + ' is NOT VERIFIED; production blocked')
+        for key in ('tool','source','observation'): visual_text(check.get(key),name + ' ' + key)
+
+
+def selection_source(task, value):
+    evidence = visual_object(value, 'selection evidence')
+    if task.get('approval_mode', 'explicit-user') == 'explicit-user' or evidence.get('origin') == 'user':
+        return visual_source(evidence)
+    if evidence.get('observer_origin') != 'independent-reviewer': raise OrchestrationError('observations must originate with an independent reviewer')
+    if evidence.get('decision') != 'accepted' or evidence.get('origin') != 'observed':
+        raise OrchestrationError('observed selection needs accepted decision and observed origin')
+    if evidence.get('reviewer') in set(task.get('owner_history', [])) | {task['created_by']}:
+        raise OrchestrationError('observed acceptance needs independent reviewer evidence')
+    for key in ('reviewer', 'tool', 'source', 'observation'): visual_text(evidence.get(key), key)
+    return evidence
+
+
+def defect_json(path):
+    try: return json.loads(Path(path).read_text(encoding='utf-8'))
+    except (OSError,ValueError) as exc: raise OrchestrationError(f'cannot read defect evidence: {exc}') from exc
+
+
+def record_defects(task, records):
+    if not isinstance(records, list) or not records: raise OrchestrationError('defects must be a nonempty list')
+    history = task.setdefault('defects', [])
+    for raw in records:
+        defect = dict(visual_object(raw, 'defect'))
+        for key in ('id','criterion','priority','reproduction','cause','owner','status'): visual_text(defect.get(key), 'defect ' + key)
+        if defect['priority'] not in ('P0','P1','P2','P3'): raise OrchestrationError('defect priority must be P0-P3')
+        if defect['status'] not in ('open','fixed','not_verified'): raise OrchestrationError('invalid defect status')
+        if defect['status'] == 'open' and any(d['criterion'] == defect['criterion'] and d['status'] == 'open' for d in current_defects(task)):
+            task['diagnosis_required'] = True
+        defect.update({'attempt':task['attempt'],'time':time.time()})
+        history.append(defect)
+
+
+def current_defects(task):
+    latest={}
+    for defect in task.get('defects',[]): latest[(defect['id'],defect['criterion'])]=defect
+    return list(latest.values())
+
+
+def result_passport(task, current=None):
+    fingerprint = current.get('fingerprint') if current else None
+    authors = set(task.get('owner_history', [])) | {task['created_by']}
+    def matches(record, readiness=False):
+        snap = record.get('snapshot')
+        snap = snap if readiness else (snap or {}).get('fingerprint')
+        return bool(fingerprint and snap == fingerprint
+                    and record.get('contract_revision') == task.get('contract_revision',1)
+                    and record.get('attempt') == task.get('attempt',0)
+                    and record.get('owner_history_digest') == owner_history_digest(task)
+                    and record.get('reviewer') not in authors)
+    reports=task.get('evidence',[])
+    current_reports=[reports[-1]] if reports and matches(reports[-1]) else []
+    stale_reports=reports[:-1] if current_reports else reports
+    accepted=bool(task['state'] in {'ready_for_review','integrated','completed'}
+                  and current_review(task) and reports and matches(reports[-1]))
+    readiness=task.get('readiness_evidence')
+    valid_readiness=readiness if accepted and readiness and matches(readiness,True) else None
+    not_verified=[]
+    if readiness and not valid_readiness: not_verified.append('readiness evidence is stale or has no current passing independent review')
+    elif not readiness: not_verified.append('readiness evidence unavailable')
+    if not accepted: not_verified.append('current independent acceptance NOT VERIFIED')
+    if valid_readiness:
+        not_verified.extend(name + ': ' + check.get('reason','unavailable') for name,check in valid_readiness.get('checks',{}).items() if check.get('result') in {'not_verified','fail','inconclusive'})
+    not_verified.extend(u for report in current_reports for u in report.get('unrun',[]))
+    qa=task.get('visual',{}).get('qa')
+    return {'task':task['id'],'state':task['state'],'contract':task.get('readiness',task['acceptance']),
+            'contract_revision':task.get('contract_revision',1),'attempt':task.get('attempt',0),
+            'artifacts':task.get('visual',{}).get('artifacts',[]),
+            'evidence_freshness':{'snapshot':fingerprint,'current_acceptance':accepted,'readiness_current':bool(valid_readiness)},
+            'independent_evidence':{'readiness':valid_readiness,'reviews':current_reports,'visual_qa':qa if accepted else None},
+            'historical_evidence':{'readiness':readiness if not valid_readiness else None,'reviews':stale_reports,'visual_qa':qa if not accepted else None},
+            'worker_reports':'separate from independent evidence','defects':current_defects(task),
+            'not_verified':not_verified,
+            'limitations':['Manual records do not prove tool execution, device use, listening, identity or model usage'],
+            'launch':task.get('readiness',{}).get('launch',{'status':'unavailable','reason':'Actual launch instructions were not recorded'}),
+            'planned_checks':task.get('readiness',{}).get('checks',[]),
+            'timing':task_timing(task),'observed_model_usage':None}
+
+
+def task_timing(task):
+    first=task.get('first_submitted_at'); last=task.get('last_submitted_at'); created=task.get('created_at')
+    def elapsed(start,end):
+        if type(start) not in (int,float) or type(end) not in (int,float): return None
+        if not (float('-inf') < start <= end < float('inf')): return None
+        return end-start
+    return {'first_version_elapsed_seconds':elapsed(created,first),
+            'rework_elapsed_seconds':elapsed(first,last),
+            'source':'manual ledger wall time; not active model time or cost'}
+
+
 def visual_source(value: Any) -> dict[str, Any]:
     evidence = visual_object(value, 'approval evidence')
     if evidence.get('decision') != 'approved' or evidence.get('origin') != 'user':
@@ -1004,7 +1167,7 @@ def visual_approval(root: Path, task: dict[str, Any], target: str) -> dict[str, 
     v = visual_current(root, task)
     record = v.get('approvals', {}).get(target) or {}
     if record.get('binding') != visual_binding(task): raise OrchestrationError(f'current user {target} approval required')
-    visual_source(record)
+    selection_source(task, record)
     if target == 'prototype':
         visual_files_current(root, v.get('prototype', []))
         if not v.get('prototype') or record.get('artifact_digest') != visual_digest(v['prototype']):
@@ -1139,7 +1302,7 @@ def cmd_visual(a: argparse.Namespace, root: Path) -> None:
                 v.pop('qa', None)
                 visual_event(v, 'preflight_recorded', a.reason)
             elif a.cmd == 'visual-approve':
-                visual_preflight(root, t); approval = dict(visual_source(data))
+                visual_preflight(root, t); approval = dict(selection_source(t, data))
                 if type(data.get('revision')) is not int or data['revision'] != v['revision']:
                     raise OrchestrationError('approval must explicitly name the current visual revision')
                 if a.target == 'direction':
@@ -1157,7 +1320,7 @@ def cmd_visual(a: argparse.Namespace, root: Path) -> None:
                     approval['artifact_digest'] = visual_digest(v['prototype'])
                     approval['direction_digest'] = visual_digest(v['approvals']['direction'])
                 approval.update({'binding': visual_binding(t), 'recorded_by': a.actor,
-                                 'evidence_mode': 'manual_user_source_record_not_authentication'})
+                                 'evidence_mode': 'manual_selection_record_not_authentication'})
                 v['approvals'][a.target] = approval; v.pop('qa', None)
                 visual_event(v, a.target + '_approved', a.reason)
             elif a.cmd == 'visual-artifacts':
@@ -1190,6 +1353,8 @@ def cmd_visual(a: argparse.Namespace, root: Path) -> None:
             elif a.cmd == 'visual-production':
                 if t['state'] != 'in_progress': raise OrchestrationError('production requires an in_progress owner')
                 visual_preflight(root, t); visual_approval(root, t, 'direction'); visual_approval(root, t, 'prototype')
+                if t.get('approval_mode'):
+                    require_slice(t, v['approvals']['prototype'])
                 if v['stage'] != 'prototype': raise OrchestrationError('production can only start after prototype approval')
                 v['stage'] = 'production'; visual_event(v, 'production_started', a.reason)
             elif a.cmd == 'visual-qa':
@@ -1268,6 +1433,7 @@ def parser() -> argparse.ArgumentParser:
     q=s.add_parser('init'); q.add_argument('--max-workers',type=int,default=3); q.add_argument('--review-round-limit',type=int,default=2); q.add_argument('--consultation-limit',type=int,default=1); q.add_argument('--escalation-limit',type=int,default=1)
     q=s.add_parser('add'); q.add_argument('id'); q.add_argument('--goal',required=True); q.add_argument('--depends-on',default=''); q.add_argument('--priority',type=int,default=50); q.add_argument('--risk',choices=['low','medium','high','critical'],default='medium'); q.add_argument('--scope',required=True,help='comma-separated paths/resources; * means shared'); q.add_argument('--acceptance',required=True); q.add_argument('--actor',required=True)
     q.add_argument('--review-mode',choices=['planned','manual-control'],default='planned',help='manual-control is an explicit low-risk opt-out from the acceptance-plan gate')
+    q.add_argument('--readiness',help='compact readiness JSON contract'); q.add_argument('--approval-mode',choices=['observed','explicit-user'],default='observed')
     q.add_argument('--profile', choices=['code', *sorted(VISUAL_PROFILES)], default='code')
     s.add_parser('list')
     q=s.add_parser('plan-review'); q.add_argument('id'); q.add_argument('--actor',required=True,help='manual actor ID; not authentication'); q.add_argument('--director',required=True); q.add_argument('--reviewer',required=True); q.add_argument('--reviewer-role',choices=sorted(ROLE_DEFAULTS)); q.add_argument('--contract-version',required=True); q.add_argument('--scenario',action='append',required=True); q.add_argument('--fresh-context-attested',action='store_true',help='manual declaration, not authentication; requires all four context items'); q.add_argument('--context-item',action='append',default=[],choices=sorted(PLAN_CONTEXT_ITEMS),help='manual fresh-context checklist item, not proof of a new reviewer context')
@@ -1275,10 +1441,12 @@ def parser() -> argparse.ArgumentParser:
     for cmd in ('start','interrupt','submit'):
         q=s.add_parser(cmd); q.add_argument('id'); q.add_argument('--actor',required=True)
     q=s.add_parser('recover',help='reassign an interrupted task after declaring the prior owner stopped'); q.add_argument('id'); q.add_argument('--owner',required=True,help='manual identity for the new owner'); q.add_argument('--actor',required=True,help='manual actor ID; identities are not authentication'); q.add_argument('--context',required=True); q.add_argument('--old-agent-interrupted',action='store_true',help='declare that the prior owner stopped; not proof that its process was killed'); q.add_argument('--owner-role',choices=sorted(ROLE_DEFAULTS))
-    q=s.add_parser('replan'); q.add_argument('id'); q.add_argument('--actor',required=True); q.add_argument('--director',required=True); q.add_argument('--reason',required=True); q.add_argument('--goal'); q.add_argument('--scope'); q.add_argument('--acceptance')
+    q=s.add_parser('replan'); q.add_argument('id'); q.add_argument('--actor',required=True); q.add_argument('--director',required=True); q.add_argument('--reason',required=True); q.add_argument('--goal'); q.add_argument('--scope'); q.add_argument('--acceptance'); q.add_argument('--diagnosis'); q.add_argument('--changed-approach')
     q=s.add_parser('escalate'); q.add_argument('id'); q.add_argument('--actor',required=True,help='manual actor ID; not authentication'); q.add_argument('--director',required=True); q.add_argument('--owner',required=True,help='manual instance identity'); q.add_argument('--owner-role',choices=['sol_senior'],required=True); q.add_argument('--reason',required=True); q.add_argument('--context',required=True); q.add_argument('--old-agent-interrupted',action='store_true',help='declare that the previous owner stopped; not proof that its process was killed')
     q=s.add_parser('consult'); q.add_argument('id'); q.add_argument('--actor',required=True); q.add_argument('--director',required=True); q.add_argument('--consultant',required=True,help='manual instance identity, separate from canonical role'); q.add_argument('--consultant-role',choices=['astra_consultant'],required=True); q.add_argument('--question',required=True); q.add_argument('--budget',required=True); q.add_argument('--outcome',required=True)
     q=s.add_parser('review'); q.add_argument('id'); q.add_argument('--reviewer',required=True,help='manual reviewer ID; not authentication'); q.add_argument('--reviewer-role',choices=sorted(ROLE_DEFAULTS)); q.add_argument('--result',choices=['pass','fail','inconclusive'],required=True); q.add_argument('--check',action='append',default=[],help='PASS; command=...; result=exit 0|passed; evidence=...'); q.add_argument('--unrun',action='append',default=[]); q.add_argument('--findings',required=True); q.add_argument('--fresh-context-attested',action='store_true',help='manual declaration, not authentication; requires all four context items'); q.add_argument('--context-item',action='append',default=[],choices=sorted(PLAN_CONTEXT_ITEMS),help='manual fresh-context checklist item, not proof of a new reviewer context'); q.add_argument('--senior-verified',action='store_true'); q.add_argument('--senior-reviewer',help='manual identity of independent read-only Sol reviewer'); q.add_argument('--senior-role',choices=['sol_reviewer']); q.add_argument('--astra-consulted',action='store_true'); q.add_argument('--director-resolved',action='store_true'); q.add_argument('--director-decision',default='')
+    q.add_argument('--readiness-evidence'); q.add_argument('--defects',help='JSON list of unified defect records')
+    q=s.add_parser('passport'); q.add_argument('id')
     q=s.add_parser('integrate'); q.add_argument('id'); q.add_argument('--actor',required=True); q.add_argument('--check',action='append',default=[]); q.add_argument('--senior-verified',action='store_true'); q.add_argument('--senior-reviewer',help='manual identity of independent read-only Sol reviewer'); q.add_argument('--senior-role',choices=['sol_reviewer']); q.add_argument('--astra-consulted',action='store_true'); q.add_argument('--director-resolved',action='store_true'); q.add_argument('--director-decision',default='')
     q=s.add_parser('complete'); q.add_argument('id'); q.add_argument('--actor',required=True); q.add_argument('--check',action='append',default=[])
     q=s.add_parser('snapshot'); q.add_argument('--json',action='store_true')
@@ -1306,6 +1474,7 @@ def main(argv: Optional[list[str]]=None) -> int:
         elif a.cmd=='snapshot':
             snap=snapshot(root); print(json.dumps(snap,ensure_ascii=True) if a.json else f"{snap['fingerprint']}\tHEAD={snap['head']}\tchanged={','.join(snap['paths']) or '(clean)'}")
         elif a.cmd=='stats': cmd_stats(a,root)
+        elif a.cmd=='passport': print(json.dumps(result_passport(get_task(load(root),a.id),snapshot(root)),ensure_ascii=True,indent=2))
         elif a.cmd.startswith('visual-'): cmd_visual(a,root)
         elif a.cmd=='add': cmd_add(a,root)
         elif a.cmd=='list': cmd_list(a,root)

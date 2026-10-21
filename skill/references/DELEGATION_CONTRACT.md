@@ -6,7 +6,7 @@ Use this contract for each backlog item. The director writes the acceptance term
 
 Use the user's language for briefs, corrections, and updates, with normal spaces between words and numbers. Preserve exact code identifiers. Lead with the concrete task and a testable done criterion; include only the scope, constraints, and evidence needed to act. Reference the task contract rather than resending it on every handoff. For example: “Fix <reproduction> in <scope>. Done when <observable check> passes. Return the diff, result, and any blocker.”
 
-Batch review findings and reuse verified evidence for the same snapshot/environment. Repeat a check only when relevant files, data, configuration, or assumptions changed, a check failed, or evidence is missing. Avoid duplicate approvals for already authorized actions; retain independent acceptance for significant changes and explicit user approvals required by the visual workflow.
+Batch review findings and reuse verified evidence for the same snapshot/environment. Repeat a check only when relevant files, data, configuration, or assumptions changed, a check failed, or evidence is missing. Avoid duplicate approvals for already authorized actions; retain independent acceptance for significant changes and user approvals explicitly requested for the visual workflow.
 
 ## Implementation brief
 
@@ -86,9 +86,9 @@ A task is complete only when the director has integrated the result and checked 
 
 ## Visual contract extension
 
-For `visual-design`, `ux-ui`, `storyboard`, or `motion-fx`, add the current spec revision, brief/audience/constraints, inspected reference links with take/avoid notes, proposed directions and exact palettes, required capabilities, promised editable/preview/report formats, and user approval sources to the brief. Bind the prototype and final artifact manifest to that revision. The Sol director still routes and accepts; Luna implements and independently reviews. These profiles add no roles and cannot use the low-risk `manual-control` review bypass.
+For `visual-design`, `ux-ui`, `storyboard`, or `motion-fx`, add the current spec revision, brief/audience/constraints, inspected reference links with take/avoid notes, proposed directions and exact palettes, required capabilities, promised editable/preview/report formats, and selection evidence and any explicitly requested user approval sources to the brief. Bind the prototype and final artifact manifest to that revision. The Sol director still routes and accepts; Luna implements and independently reviews. These profiles add no roles and cannot use the low-risk `manual-control` review bypass.
 
-Use [Visual workflow](VISUAL_WORKFLOW.md) for the schemas and four profile-specific acceptance checklists. Production requires explicit user approval of a direction/palette and then the rendered prototype. Review must open each current preview with an inspection tool, check the editable source, and record observed findings. UI adds interactions, responsive layouts, and accessibility; motion adds full-duration playback, timing, transitions, and continuity. A text `PASS`, filenames, or still frames for motion are insufficient. `visual-qa` supplements the existing review/integrate/complete gates; it does not replace them. Spec or direction changes require new version-bound evidence and approvals. The CLI records these claims but cannot inspect pixels, execute tools, or authenticate the user/reviewer.
+Use [Visual workflow](VISUAL_WORKFLOW.md) for the schemas and four profile-specific acceptance checklists. Production requires observed direction selection and independent prototype acceptance; explicit user approval applies only when requested. Review must open each current preview with an inspection tool, check the editable source, and record observed findings. UI adds interactions, responsive layouts, and accessibility; motion adds full-duration playback, timing, transitions, and continuity. A text `PASS`, filenames, or still frames for motion are insufficient. `visual-qa` supplements the existing review/integrate/complete gates; it does not replace them. Spec or direction changes require new version-bound evidence and approvals. The CLI records these claims but cannot inspect pixels, execute tools, or authenticate the user/reviewer.
 
 ## Recovery contract
 
@@ -101,3 +101,8 @@ Bundle concrete review findings into one bounded correction request. Set the led
 ## Competing hypotheses
 
 For a persistent bug or architecture question, two agents may investigate distinct hypotheses independently. The director defines the question, budget, constraints, and stop condition. Ask for evidence and a discriminating check rather than two complete implementations. Astra is used only where its advice could change the decision. Any prototype is evaluated against shared acceptance criteria and integrated only after a reasoned selection.
+
+
+## Readiness and completion evidence
+
+Follow [the readiness contract](READINESS.md): proportional functional/user criteria and applicable visual/audio/performance/device observations; an early finished slice compared against actual references before visual production; autonomous observed selection unless the user explicitly requests approval gates. Independent evidence must remain separate from worker/director claims; unavailable checks stay NOT VERIFIED with reasons. Repeated SAME-criterion failures require diagnosis and a changed approach, preserving acceptance. Deliver a compact passport with artifacts, evidence, limitations and launch steps. Separate first-version/rework wall time from actual model usage; missing usage stays unknown and time never implies cost.

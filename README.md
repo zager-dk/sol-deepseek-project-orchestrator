@@ -1,6 +1,6 @@
 # Sol + Luna Project Orchestrator
 
-Current release: [v0.2.0](https://github.com/zager-dk/sol-deepseek-project-orchestrator/releases/tag/v0.2.0). The complete ZIP package includes the skill, installer, role templates, hooks, examples, and tests; extract it before running the explicit-target installer.
+Repository/installed skill version: **0.3.0** (`skill/VERSION`). Install from a complete checkout containing the skill, installer, role templates, hooks, examples and tests. Published packages, when available, are listed under [Releases](https://github.com/zager-dk/sol-deepseek-project-orchestrator/releases).
 
 ## Optional ledger storage directory
 
@@ -47,7 +47,7 @@ Role model and effort values are defaults for an explicitly chosen orchestration
 
 Alongside the default `code` workflow, `add --profile` accepts `visual-design`, `ux-ui`, `storyboard`, and `motion-fx`. They use the same Sol director/router, six child roles, Luna-first implementation, independent review, and integration gates. No Unreal Engine integration is included.
 
-The visual path is brief → real inspected reference links with take/avoid notes → 2–3 directions with boards, palettes, and motion references when relevant → explicit user direction approval → rendered prototype approval → production → independent visual QA → editable sources, preview, and report. A sourced, versioned, user-approved existing style can supply one direction. Capabilities must be observed in the current environment; a missing required capability blocks work unless the user agrees to a newly specified reduced scope. Generators are optional when not required by the brief.
+The visual path is brief → real inspected reference links with take/avoid notes → 2–3 directions with boards, palettes, and motion references when relevant → observed direction selection → independently accepted finished prototype (explicit user approvals only when requested) → production → independent visual QA → editable sources, preview, and report. A sourced, versioned, user-approved existing style can supply one direction. Capabilities must be observed in the current environment; a missing required capability blocks work unless the user agrees to a newly specified reduced scope. Generators are optional when not required by the brief.
 
 The reviewer actually opens current renders, tests UI interactions/responsive behavior/accessibility, and plays motion previews in full. The CLI records version-bound manual evidence and checks file fingerprints; it does not run visual tools or authenticate approvals. See [Visual workflow](skill/references/VISUAL_WORKFLOW.md) for commands, JSON schemas, four profile checklists, and starter examples. `stats --format json` includes a visual category sidecar; it makes no observed model/token/cost claims.
 
@@ -96,3 +96,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Keep the skill and its focused reference
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+Version 0.3.0 adds [proportional readiness and result passports](skill/references/READINESS.md), automatic observed selection with an explicit-user option, and diagnosis before repeated-criterion retries. The installed skill version is recorded in `skill/VERSION`.

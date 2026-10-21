@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-21
+
+### Added
+
+- Proportional readiness contracts, independent outcome/device/performance/audio evidence, early finished slices and actual reference comparison.
+- Unified defect records and repeated-criterion diagnosis/replan gate, result passport and separate first-version/rework wall time; unavailable usage remains null.
+
+### Changed
+
+- New tasks default to observed selection with independent prototype acceptance. Explicit user approval mode and legacy behavior remain available.
+- Director claims and relevant unverified checks cannot satisfy independent PASS.
+
+
 ## [0.2.0] - 2026-10-13
 
 ### Added

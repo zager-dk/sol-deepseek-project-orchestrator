@@ -13,8 +13,8 @@ The worker must create and inspect the deliverables with available tools; the in
 1. **Brief and capability check.** Agree the idea, audience, constraints, deliverables, and observable acceptance criteria. Check actual tool availability before promising a workflow. Prepare an independent acceptance plan before assignment; visual tasks cannot use `--review-mode manual-control`.
 2. **Real references.** Search and open relevant sources. Preserve their HTTP(S) links, inspection evidence, and specific “take” and “avoid” notes. Do not invent references or imply an unviewed link was inspected.
 3. **Directions.** Prepare 2–3 coherent directions with reference boards and exact palettes. Motion directions also identify inspected motion examples. A user-approved existing style may supply one direction when its source, version, scope, and approval are recorded. It still needs a current direction approval and prototype approval for this task.
-4. **Direction approval.** Present the boards, palette, rationale, and tradeoffs. Record the user's explicit selection of the current direction and exact palette. The director or reviewer cannot approve on the user's behalf.
-5. **Prototype approval.** Build and render a small representative prototype of the selected direction. Show that artifact to the user and record approval of its current digest. Then explicitly enter production.
+4. **Direction approval.** Present the boards, palette, rationale, and tradeoffs. Record observed selection of the current direction and exact palette with independent evidence. If the user explicitly requested approval gates, record their sourced approval instead; agents never approve on their behalf.
+5. **Prototype approval.** Build and render a small representative prototype of the selected direction. Compare the actual rendered finished slice against inspected references, exercise its main flow and relevant audio, and record independent acceptance of its current digest. If explicit user approval was requested, obtain it. Then enter production.
 6. **Production.** Produce all agreed editable sources, previews, and a report. Stay within the approved direction and scope; do not switch style during implementation.
 7. **Independent visual QA.** Submit the final manifest. A reviewer separate from the director and every author actually opens every preview, inspects editable sources, and runs the relevant profile checks below. Record visual QA, then the normal independent `review`, `integrate`, and `complete` steps.
 8. **Delivery.** Hand over the editable sources, usable preview, and report with verified paths/links, formats, current revision, QA results, known limitations, and failed/unrun checks. Ledger completion records the `delivery` stage; it does not upload or send files.
@@ -65,7 +65,7 @@ The [static spec](../examples/visual/static-spec.json) and [UI spec](../examples
 
 ## Approval and artifact JSON
 
-Every user-source approval contains these fields. This is a template, not approval:
+Default observed selection uses the shape in [Readiness](READINESS.md). The following explicit-user approval shape is used only when requested (or on legacy tasks); it is a template, not approval:
 
 ```json
 {
@@ -124,9 +124,9 @@ Use `python scripts/orchestrate.py --project /path/to/repo COMMAND`. The install
 | `add V-101 --profile visual-design --goal "..." --scope "design" --acceptance "..." --actor director` | Create a visual task; use the usual dependencies, risk, and priority options as needed |
 | `visual-spec V-101 --actor director --file spec.json` | Record prepared brief/references/boards and create the next visual revision |
 | `visual-preflight V-101 --actor director --file capabilities.json` | Record all observed capability categories for this revision |
-| `visual-approve V-101 --actor director --target direction --file direction-approval.json` | Record sourced explicit user direction/palette approval |
+| `visual-approve V-101 --actor director --target direction --file direction-approval.json` | Record observed direction/palette selection, or explicitly requested user approval |
 | `visual-artifacts V-101 --actor worker --target prototype --file prototype.json` | In-progress owner registers a rendered prototype |
-| `visual-approve V-101 --actor director --target prototype --file prototype-approval.json` | Record sourced approval of its current digest |
+| `visual-approve V-101 --actor director --target prototype --file prototype-approval.json` | Record independent observed acceptance of its current digest, or explicitly requested user approval |
 | `visual-production V-101 --actor director` | In-progress task enters production after both current approvals |
 | `visual-artifacts V-101 --actor worker --target final --file final.json` | Owner registers all promised deliverables |
 | `submit V-101 --actor worker` | Enter normal review state and visual `qa` stage |
@@ -142,3 +142,8 @@ This is the visual portion, not a standalone runnable lifecycle: also `init`, `p
 - Before production, registering a changed prototype removes prototype approval. Once production starts, return through a new spec to change the prototype/direction. Final corrections invalidate QA; re-register final artifacts and repeat observed review after the usual failure/correction transition.
 - Visual QA binds to the artifact set, both approval records, owner history, and implementation attempt. File drift, an author change, or a new attempt cannot reuse its pass. Integrated/completed tasks cannot mutate visual records; create a follow-up task for a new delivered revision. Interruption recovery still requires preservation of edits and a stopped-owner declaration.
 - `stats --format json` adds a `visual` sidecar section with per-profile counts and category records (`event`, `stage`, `revision`, `reason`, and optional result) using pseudonymous task references. Its `summary` contains `events_by_type`, `revision_reasons`, and `qa_results` category counters. Raw user quotes, paths, sources, and findings stay out of that export. JSON-only visual details do not extend the fixed CSV columns. `evidence_source` is `manual_ledger_records`; `observed_model`, `observed_tokens`, and `observed_cost` remain `null`. These records do not support model, token, spend, or savings claims.
+
+
+## Readiness and completion evidence
+
+Follow [the readiness contract](READINESS.md): proportional functional/user criteria and applicable visual/audio/performance/device observations; an early finished slice compared against actual references before visual production; autonomous observed selection unless the user explicitly requests approval gates. Independent evidence must remain separate from worker/director claims; unavailable checks stay NOT VERIFIED with reasons. Repeated SAME-criterion failures require diagnosis and a changed approach, preserving acceptance. Deliver a compact passport with artifacts, evidence, limitations and launch steps. Separate first-version/rework wall time from actual model usage; missing usage stays unknown and time never implies cost.
